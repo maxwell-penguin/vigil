@@ -1,0 +1,35 @@
+db_path: ./vigil.db
+port: 8080
+
+# Optional: opens/dedupes GitHub issues on SLO breach. Leave blank to log-only.
+github_token: ""
+github_repo: "" # owner/repo
+
+probes:
+  - project_id: example-site
+    url: https://example.com
+    expected_status: 200
+  - project_id: httpbin-ok
+    url: https://httpbin.org/status/200
+    expected_status: 200
+  # Only resolves inside the docker-compose network — harmless probe
+  # failures if you run `go run ./cmd/server` outside Docker.
+  - project_id: demo-app
+    url: http://demo-app:9090/api/data
+    expected_status: 200
+
+slos:
+  - project_id: example-site
+    target_pct: 99.5
+    latency_threshold_ms: 200
+    window_days: 30
+  - project_id: demo-app
+    target_pct: 99.5
+    latency_threshold_ms: 200
+    window_days: 30
+  # Powers the GET /demo seed endpoint — hit it once, then point the
+  # dashboard at project "demo" to see it populated instantly.
+  - project_id: demo
+    target_pct: 90.0
+    latency_threshold_ms: 200
+    window_days: 30

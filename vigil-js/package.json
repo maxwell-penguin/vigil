@@ -1,0 +1,17 @@
+{
+  "name": "vigil-sdk",
+  "version": "0.1.0",
+  "description": "Lightweight event tracking client for vigil",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test tests/"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

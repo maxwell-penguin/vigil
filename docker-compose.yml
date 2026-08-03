@@ -1,0 +1,25 @@
+services:
+  vigil:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - vigil-data:/data
+    restart: unless-stopped
+
+  demo-app:
+    image: golang:1.22-alpine
+    working_dir: /app
+    volumes:
+      - ./demo:/app:ro
+    command: ["go", "run", "main.go"]
+    environment:
+      VIGIL_URL: http://vigil:8080
+    ports:
+      - "9090:9090"
+    depends_on:
+      - vigil
+    restart: unless-stopped
+
+volumes:
+  vigil-data:
