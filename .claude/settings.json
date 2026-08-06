@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:8080/slo/demo)",
+      "Bash(curl -s http://localhost:8080/incidents/demo)",
+      "Bash(curl -s http://localhost:8080/metrics/demo)",
+      "Bash(cp .env.example .env)",
+      "Bash(npm install *)",
+      "Bash(VITE_PROJECT_ID=demo npm run dev -- --port 5173)",
+      "Bash(disown)",
+      "Bash(curl -s http://localhost:5174/ -o /dev/null -w \"frontend status: %{http_code}\\\\n\")",
+      "Bash(npx --version)",
+      "Bash(python3 -c \"import playwright\")",
+      "Bash(pip3 show *)",
+      "Bash(npm run *)"
+    ]
+  }
+}
