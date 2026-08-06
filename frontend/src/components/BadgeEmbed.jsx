@@ -13,23 +13,30 @@ export default function BadgeEmbed({ projectId }) {
   }
 
   return (
-    <div className="rounded-lg border border-[#e1e0d9] dark:border-[#2c2c2a] bg-[#fcfcfb] dark:bg-[#1a1a19] p-5">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-medium text-[#0b0b0b] dark:text-white">
-          Badge embed
-        </div>
+    <div id="badge" className="card scroll-mt-20 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm font-medium text-ink">README badge</div>
         <img src={url} alt="vigil status badge" height={20} />
       </div>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 truncate rounded bg-[#f0efec] dark:bg-[#0d0d0d] px-3 py-2 text-xs text-[#52514e] dark:text-[#c3c2b7]">
-          {snippet}
-        </code>
+
+      <div className="relative mt-4">
         <button
           onClick={copy}
-          className="shrink-0 rounded bg-[#2a78d6] dark:bg-[#3987e5] px-3 py-2 text-xs font-medium text-white hover:opacity-90"
+          className="absolute right-2 top-2 rounded-md border border-white/15 px-2 py-1 text-xs font-medium text-[#d4d4d4] transition-colors hover:bg-white/10 hover:text-white"
         >
           {copied ? "Copied" : "Copy"}
         </button>
+        <pre className="overflow-x-auto rounded-lg bg-[#1e1e1e] p-3 pr-20 font-mono text-xs leading-relaxed">
+          <code>
+            <span className="text-[#d4d4d4]">!</span>
+            <span className="text-[#d4d4d4]">[</span>
+            <span className="text-[#ce9178]">vigil status</span>
+            <span className="text-[#d4d4d4]">]</span>
+            <span className="text-[#d4d4d4]">(</span>
+            <span className="text-[#569cd6]">{url}</span>
+            <span className="text-[#d4d4d4]">)</span>
+          </code>
+        </pre>
       </div>
     </div>
   );
