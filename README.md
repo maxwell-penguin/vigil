@@ -44,6 +44,7 @@ Drop a live status badge in your own README:
 - [How Breach Detection Works](#how-breach-detection-works)
 - [Architecture](#architecture)
 - [Badge](#badge)
+- [Status Pages](#status-pages)
 - [Deployment](#deployment)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
@@ -114,6 +115,20 @@ current SLO status, `Cache-Control: no-cache` so it's never stale:
 
 Renders green with your current SLO % when healthy, red with `BREACHING`
 when you're not.
+
+## Status Pages
+
+Every project gets a public status page at:
+
+```
+https://your-vigil-instance.fly.dev/status/{project_id}
+```
+
+No login required. Shows current operational status, 30-day uptime,
+90-day uptime grid, and recent incident history. Link it from your
+project's docs or README so users always know where to check.
+
+Live example: https://vigil-calm-cherry-433.fly.dev/status/demo
 
 ## Deployment
 
