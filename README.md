@@ -1,11 +1,85 @@
-# vigil
+<div align="center">
 
-**SRE reliability toolkit for open source maintainers.**
+![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)
+![Fly.io](https://img.shields.io/badge/deployed-fly.io-purple)
 
-Vigil tracks your project's uptime and latency, computes a real error-budget
-SLO, catches breaches early with a two-window burn-rate alarm, and opens a
-GitHub issue with a pre-filled postmortem so you don't have to build any of
-that yourself.
+# Vigil
+
+*SRE reliability toolkit for open source maintainers*
+
+🚀 **[Live Demo](https://vigil-murex-ten.vercel.app)** — type `demo` to see 7 days of data including a simulated breach event
+
+</div>
+
+Vigil tracks your project's uptime and latency, computes a real error-budget SLO, catches breaches early with a two-window burn-rate alarm, and opens a GitHub issue with a pre-filled postmortem so you don't have to build any of that yourself.
+
+## Features
+
+- 📡 Push + pull metric collection (SDK batching + external prober)
+- 📊 Two-window burn rate SLO engine (Google SRE Workbook algorithm)
+- 🚨 Auto-opens GitHub Issues with pre-filled postmortem on breach
+- ⏱️ SQLite time-series with automatic 1m/1h downsampling
+- 🏷️ Embeddable SVG README badge showing live uptime
+- 📦 Python + JavaScript SDKs with background batching
+- 🐳 Docker + Fly.io ready, ~9MB image
+
+## Demo
+
+<!-- Add GIF demo here -->
+
+Drop a live status badge in your own README:
+
+```md
+[![vigil status](https://vigil-calm-cherry-433.fly.dev/badge/example-site)](https://vigil-calm-cherry-433.fly.dev)
+```
+
+## Table of Contents
+
+- [Features](#features)
+- [Demo](#demo)
+- [Quick Start](#quick-start)
+- [How Breach Detection Works](#how-breach-detection-works)
+- [Architecture](#architecture)
+- [Badge](#badge)
+- [Deployment](#deployment)
+- [Project Structure](#project-structure)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Quick Start
+
+```sh
+# 1. Clone
+git clone https://github.com/maxwell-penguin/vigil.git && cd vigil
+
+# 2. Configure — set your probe targets and SLOs
+cp vigil.yaml.example vigil.yaml
+
+# 3. Run
+go run ./cmd/server
+
+# 4. Seed some demo data (7 days incl. a simulated breach) and see it live
+curl http://localhost:8080/demo
+cd frontend && cp .env.example .env && npm install && npm run dev
+
+# 5. Add the badge above to your README, pointed at your vigil server
+```
+
+Or run the whole thing — server, dashboard, and a self-instrumented demo app — with `docker-compose up`.
+
+## How Breach Detection Works
+
+Vigil uses the two-window burn-rate algorithm from the [Google SRE
+Workbook](https://sre.google/workbook/alerting-on-slos/). Instead of
+alerting the instant one request fails, it tracks how fast you're burning
+through your 30-day error budget over two windows at once — the last 5
+minutes and the last hour — and only fires when **both** are burning
+dangerously fast (more than 14.4x and 1x the sustainable rate, respectively).
+Requiring the fast, noisy signal and the slower, stable one to agree means a
+single blip doesn't page you, but a real outage still gets caught within
+minutes instead of after it's already eaten your whole month's budget.
 
 ## Architecture
 
@@ -34,51 +108,27 @@ Drop this in your README — it's a live SVG, generated per-request from your
 current SLO status, `Cache-Control: no-cache` so it's never stale:
 
 ```md
-[![vigil status](https://vigil.your-domain.com/badge/my-project)](https://vigil.your-domain.com)
+[![vigil status](https://vigil-calm-cherry-433.fly.dev/badge/my-project)](https://vigil-calm-cherry-433.fly.dev)
 ```
 
 Renders green with your current SLO % when healthy, red with `BREACHING`
 when you're not.
 
-## Quick start
+## Deployment
+
+- **Backend:** Fly.io — https://vigil-calm-cherry-433.fly.dev
+- **Frontend:** Vercel — https://vigil-murex-ten.vercel.app
+
+SQLite is persisted on a Fly volume. The Docker image is a static musl
+build on `scratch`, ~9MB.
 
 ```sh
-# 1. Clone
-git clone https://github.com/your-org/vigil.git && cd vigil
-
-# 2. Configure — set your probe targets and SLOs
-cp vigil.yaml.example vigil.yaml
-
-# 3. Run
-go run ./cmd/server
-
-# 4. Add the badge above to your README, pointed at your vigil server
+fly launch
+fly volumes create vigil_data --size 1
+flyctl deploy
 ```
 
-Want to see it working before you have real traffic? `curl` the seed
-endpoint and point the dashboard at project `demo`:
-
-```sh
-curl http://localhost:8080/demo
-cd frontend && cp .env.example .env && npm install && npm run dev
-```
-
-Or run the whole thing — server, dashboard, and a self-instrumented demo
-app — with `docker-compose up`.
-
-## How breach detection works
-
-Vigil uses the two-window burn-rate algorithm from the [Google SRE
-Workbook](https://sre.google/workbook/alerting-on-slos/). Instead of
-alerting the instant one request fails, it tracks how fast you're burning
-through your 30-day error budget over two windows at once — the last 5
-minutes and the last hour — and only fires when **both** are burning
-dangerously fast (more than 14.4x and 1x the sustainable rate, respectively).
-Requiring the fast, noisy signal and the slower, stable one to agree means a
-single blip doesn't page you, but a real outage still gets caught within
-minutes instead of after it's already eaten your whole month's budget.
-
-## Project structure
+## Project Structure
 
 ```
 vigil/
@@ -99,3 +149,13 @@ vigil/
 ├── docker-compose.yml   # vigil server + demo-app, one command
 └── Dockerfile           # static musl build -> scratch image
 ```
+
+## Contributing
+
+PRs welcome. Please open an issue first to discuss what you'd like to
+change. Run `go test ./...` before submitting.
+
+## License
+
+MIT
+</content>
