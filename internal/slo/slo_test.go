@@ -20,6 +20,9 @@ func TestComputeBreaches(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	// InsertEvent only queues for the async writer; StartWriter isn't
+	// running in this test, so seed directly via InsertEventsBatch instead.
+	var events []models.Event
 	for i := 0; i < 100; i++ {
 		e := models.Event{
 			ProjectID:  "p",
@@ -32,9 +35,10 @@ func TestComputeBreaches(t *testing.T) {
 			e.StatusCode = 500
 			e.Error = true
 		}
-		if err := s.InsertEvent(e); err != nil {
-			t.Fatal(err)
-		}
+		events = append(events, e)
+	}
+	if err := s.InsertEventsBatch(events); err != nil {
+		t.Fatal(err)
 	}
 
 	st, err := Compute(s, models.SLO{

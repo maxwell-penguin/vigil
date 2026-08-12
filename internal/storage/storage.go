@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -11,6 +12,12 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"vigil/internal/models"
+)
+
+const (
+	eventQueueSize     = 1000
+	eventBatchSize     = 100
+	eventFlushInterval = 500 * time.Millisecond
 )
 
 const schema = `
@@ -85,13 +92,32 @@ func migrateAlertColumns(db *sql.DB) error {
 }
 
 type Store struct {
-	db *sql.DB
+	db         *sql.DB
+	eventQueue chan []models.Event
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", path+"?_journal=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	// PRAGMAs set via Exec only bind to whichever connection runs them, not
+	// to every connection database/sql may later open from the pool — pin
+	// the pool to one connection so synchronous/busy_timeout reliably apply
+	// on every query. Writes are already serialized through the event
+	// queue's single writer goroutine, so this costs no real write
+	// concurrency; it just keeps other queries off separate, unpragma'd
+	// connections. journal_mode=WAL is persisted in the DB file itself, so
+	// it doesn't strictly need this, but setting it here keeps all three
+	// PRAGMAs in one place.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`
+		PRAGMA journal_mode=WAL;
+		PRAGMA synchronous=NORMAL;
+		PRAGMA busy_timeout=5000;
+	`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set pragmas: %w", err)
 	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -101,25 +127,60 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, eventQueue: make(chan []models.Event, eventQueueSize)}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// InsertEvent enqueues a single event for the writer goroutine started by
+// StartWriter to batch and flush. It never blocks: if the queue is full
+// (StartWriter isn't running, or the DB can't keep up), the event is
+// dropped and logged rather than stalling the caller's request.
 func (s *Store) InsertEvent(e models.Event) error {
-	errBit := 0
-	if e.Error {
-		errBit = 1
-	}
-	_, err := s.db.Exec(
-		`INSERT INTO raw_events (project_id, timestamp, latency_ms, status_code, error)
-		 VALUES (?, ?, ?, ?, ?)`,
-		e.ProjectID, e.Timestamp.Unix(), e.LatencyMS, e.StatusCode, errBit,
-	)
-	if err != nil {
-		return fmt.Errorf("insert event: %w", err)
+	select {
+	case s.eventQueue <- []models.Event{e}:
+	default:
+		log.Printf("event queue full: dropping event for project %s", e.ProjectID)
 	}
 	return nil
+}
+
+// StartWriter launches the goroutine that drains eventQueue and flushes it
+// to SQLite via InsertEventsBatch — batching up to eventBatchSize events or
+// waiting up to eventFlushInterval, whichever comes first. It returns
+// immediately; the goroutine exits once ctx is cancelled, flushing whatever
+// remains queued.
+func (s *Store) StartWriter(ctx context.Context) {
+	go func() {
+		batch := make([]models.Event, 0, eventBatchSize)
+		ticker := time.NewTicker(eventFlushInterval)
+		defer ticker.Stop()
+
+		flush := func() {
+			if len(batch) == 0 {
+				return
+			}
+			if err := s.InsertEventsBatch(batch); err != nil {
+				log.Printf("event writer: flush %d events: %v", len(batch), err)
+			}
+			batch = batch[:0]
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				flush()
+				return
+			case events := <-s.eventQueue:
+				batch = append(batch, events...)
+				if len(batch) >= eventBatchSize {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
+			}
+		}
+	}()
 }
 
 // Downsample rolls up raw_events older than 24h into 1m buckets,

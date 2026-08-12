@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,22 +22,20 @@ func TestDownsampleRollsUpAndDeletes(t *testing.T) {
 	old := now.Add(-48 * time.Hour)    // must roll into 1m
 	fresh := now.Add(-1 * time.Minute) // must stay raw
 
+	// InsertEvent only queues for the async writer; StartWriter isn't
+	// running in this test, so seed directly via InsertEventsBatch instead.
+	var events []models.Event
 	for i := 0; i < 3; i++ {
-		if err := s.InsertEvent(models.Event{
+		events = append(events, models.Event{
 			ProjectID: "p", Timestamp: old.Add(time.Duration(i) * time.Second),
 			LatencyMS: 100, StatusCode: 200, Error: false,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
 	}
-	if err := s.InsertEvent(models.Event{
-		ProjectID: "p", Timestamp: old, LatencyMS: 500, StatusCode: 500, Error: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.InsertEvent(models.Event{
-		ProjectID: "p", Timestamp: fresh, LatencyMS: 50, StatusCode: 200, Error: false,
-	}); err != nil {
+	events = append(events,
+		models.Event{ProjectID: "p", Timestamp: old, LatencyMS: 500, StatusCode: 500, Error: true},
+		models.Event{ProjectID: "p", Timestamp: fresh, LatencyMS: 50, StatusCode: 200, Error: false},
+	)
+	if err := s.InsertEventsBatch(events); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,5 +63,45 @@ func TestDownsampleRollsUpAndDeletes(t *testing.T) {
 	}
 	if ms[0].Resolution != "1m" {
 		t.Fatalf("want 1m, got %s", ms[0].Resolution)
+	}
+}
+
+// ponytail: one self-check for the writer goroutine — below eventBatchSize,
+// so this only lands once the eventFlushInterval ticker fires, proving the
+// "whichever comes first" timer path actually works (the size-triggered
+// path is implicitly covered by every other test that seeds >100 events).
+func TestStartWriterFlushesOnTimer(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.StartWriter(ctx)
+
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		if err := s.InsertEvent(models.Event{
+			ProjectID: "p", Timestamp: now, LatencyMS: 50, StatusCode: 200, Error: false,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var count int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM raw_events`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 5 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("events not flushed within deadline, got %d rows", count)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

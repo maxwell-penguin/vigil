@@ -26,6 +26,9 @@ func TestHandlerExposesMetrics(t *testing.T) {
 	mux.HandleFunc("GET /prometheus/{project_id}", Handler(s, slos))
 
 	now := time.Now().UTC()
+	// InsertEvent only queues for the async writer; StartWriter isn't
+	// running in this test, so seed directly via InsertEventsBatch instead.
+	var events []models.Event
 	for i := 0; i < 100; i++ {
 		e := models.Event{
 			ProjectID: "p", Timestamp: now.Add(-time.Duration(i) * time.Second),
@@ -35,9 +38,10 @@ func TestHandlerExposesMetrics(t *testing.T) {
 			e.StatusCode = 500
 			e.Error = true
 		}
-		if err := s.InsertEvent(e); err != nil {
-			t.Fatal(err)
-		}
+		events = append(events, e)
+	}
+	if err := s.InsertEventsBatch(events); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.InsertAlert(models.Alert{ProjectID: "p", FiredAt: now.Add(-time.Hour), ResolvedAt: now.Add(-50 * time.Minute)}); err != nil {
 		t.Fatal(err)

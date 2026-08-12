@@ -44,6 +44,10 @@ func main() {
 	}
 	defer store.Close()
 
+	writerCtx, cancelWriter := context.WithCancel(context.Background())
+	defer cancelWriter()
+	store.StartWriter(writerCtx)
+
 	var notifier slo.Notifier
 	if cfg.GitHubToken != "" && cfg.GitHubRepo != "" {
 		ghClient := github.NewClient(cfg.GitHubToken, cfg.GitHubRepo)
@@ -91,7 +95,8 @@ func main() {
 		close(stop)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx) // drain in-flight /ingest requests first...
+		cancelWriter()        // ...then flush whatever they queued
 	}()
 
 	log.Printf("vigil listening on %s (db=%s, %d probes, %d slos)",

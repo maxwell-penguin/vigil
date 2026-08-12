@@ -26,13 +26,17 @@ func TestHandlerColorsByBreachState(t *testing.T) {
 	mux.HandleFunc("GET /badge/{project_id}", Handler(s, slos))
 
 	now := time.Now().UTC()
+	// InsertEvent only queues for the async writer; StartWriter isn't
+	// running in this test, so seed directly via InsertEventsBatch instead.
+	var healthy []models.Event
 	for i := 0; i < 10; i++ {
-		if err := s.InsertEvent(models.Event{
+		healthy = append(healthy, models.Event{
 			ProjectID: "p", Timestamp: now.Add(-time.Duration(i) * time.Second),
 			LatencyMS: 50, StatusCode: 200, Error: false,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
+	}
+	if err := s.InsertEventsBatch(healthy); err != nil {
+		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/badge/p", nil)
@@ -46,13 +50,15 @@ func TestHandlerColorsByBreachState(t *testing.T) {
 		t.Fatalf("expected percentage message on healthy badge, got: %s", body)
 	}
 
+	var breaching []models.Event
 	for i := 0; i < 30; i++ {
-		if err := s.InsertEvent(models.Event{
+		breaching = append(breaching, models.Event{
 			ProjectID: "p", Timestamp: now.Add(-time.Duration(i) * time.Second),
 			LatencyMS: 50, StatusCode: 500, Error: true,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
+	}
+	if err := s.InsertEventsBatch(breaching); err != nil {
+		t.Fatal(err)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/badge/p", nil)
