@@ -31,6 +31,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	if dbPath := os.Getenv("VIGIL_DB_PATH"); dbPath != "" {
+		cfg.DBPath = dbPath
+	}
 
 	store, err := storage.Open(cfg.DBPath)
 	if err != nil {
@@ -64,7 +67,7 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Addr:              fmt.Sprintf("0.0.0.0:%d", cfg.Port),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}

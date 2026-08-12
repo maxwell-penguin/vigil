@@ -1,0 +1,12 @@
+# flyctl launch added from .gitignore
+**/vigil.yaml
+**/vigil.db
+**/vigil.db-shm
+**/vigil.db-wal
+vigil
+
+# flyctl launch added from frontend/.gitignore
+frontend/**/node_modules
+frontend/**/dist
+frontend/**/.env
+fly.toml

@@ -1,7 +1,3 @@
-# mattn/go-sqlite3 is cgo, so a binary built the normal way is dynamically
-# linked against musl and won't run on `scratch` (no libc there at all).
-# Statically linking against musl on Alpine is what makes the scratch stage
-# actually work.
 FROM golang:1.22-alpine AS build
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /src
@@ -15,6 +11,6 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 FROM scratch
 WORKDIR /data
 COPY --from=build /vigil /vigil
-COPY vigil.yaml.example /data/vigil.yaml
+COPY vigil.yaml.example /etc/vigil/vigil.yaml
 EXPOSE 8080
-ENTRYPOINT ["/vigil", "-config", "/data/vigil.yaml"]
+ENTRYPOINT ["/vigil", "-config", "/etc/vigil/vigil.yaml"]
