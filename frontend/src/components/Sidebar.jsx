@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 const VIEWS = ["Overview", "Latency", "Incidents", "SLO Config"];
 
 function SectionLabel({ children }) {
@@ -12,6 +14,9 @@ export default function Sidebar({ projectId, onProjectChange, slo, view, onViewC
   // No SLO loaded yet reads as neutral rather than falsely healthy.
   const dotColor = !slo ? "bg-ink-muted" : slo.is_breaching ? "bg-danger" : "bg-ok";
 
+  const [inputValue, setInputValue] = useState(projectId);
+  useEffect(() => setInputValue(projectId), [projectId]);
+
   return (
     <aside className="sticky top-0 h-screen w-60 shrink-0 overflow-y-auto border-r border-line bg-[#fafafa] px-4 py-5">
       <div className="px-2 text-[15px] font-semibold tracking-tight text-ink">Vigil</div>
@@ -25,29 +30,18 @@ export default function Sidebar({ projectId, onProjectChange, slo, view, onViewC
         Project
       </label>
       <div className="relative mt-1">
-        <select
+        <input
           id="project-select"
-          value={projectId}
-          onChange={(e) => onProjectChange(e.target.value)}
-          className="w-full appearance-none rounded-md border border-line bg-white p-2 pr-8 text-sm text-ink focus:border-accent focus:outline-none"
-        >
-          {/* Only the active project — there's no endpoint that lists projects. */}
-          <option value={projectId}>{projectId}</option>
-        </select>
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted"
-        >
-          <path
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M6 9l6 6 6-6"
-          />
-        </svg>
+          type="text"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && inputValue.trim()) {
+              onProjectChange(inputValue.trim());
+            }
+          }}
+          className="w-full rounded-md border border-line bg-white p-2 text-sm text-ink focus:border-accent focus:outline-none"
+        />
       </div>
 
       <SectionLabel>Views</SectionLabel>
