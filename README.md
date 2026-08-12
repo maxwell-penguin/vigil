@@ -47,6 +47,7 @@ Drop a live status badge in your own README:
 - [Badge](#badge)
 - [Status Pages](#status-pages)
 - [Deployment](#deployment)
+- [Security](#security)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
@@ -144,6 +145,22 @@ fly launch
 fly volumes create vigil_data --size 1
 flyctl deploy
 ```
+
+## Security
+
+Set `api_key` in `vigil.yaml` to protect all endpoints except
+the public badge and status page:
+
+```yaml
+api_key: "your-secret-key-here"
+```
+
+Then pass it in SDK calls and API requests:
+```
+Authorization: Bearer your-secret-key-here
+```
+
+Generate a strong key with: `openssl rand -hex 32`
 
 ## Project Structure
 

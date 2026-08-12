@@ -11,6 +11,10 @@ webhook_type: "slack" # or "discord"
 
 # Prometheus: scrape GET /prometheus/{project_id} for each project
 
+# API key for protecting write and read endpoints.
+# Leave empty to disable auth (not recommended for production).
+api_key: ""
+
 probes:
   - project_id: example-site
     url: https://example.com

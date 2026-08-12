@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"vigil/internal/auth"
 	"vigil/internal/badge"
 	"vigil/internal/collector"
 	"vigil/internal/demo"
@@ -67,16 +68,24 @@ func main() {
 	go store.RunDownsampleLoop(1*time.Hour, stop)
 	go slo.NewChecker(store, cfg.SLOs, 60*time.Second, notifier, webhookNotifier).Run(stop)
 
+	// Wraps a handler with CORS then auth (auth runs first, so an
+	// unauthorized request never gets a CORS header). apiKey == "" makes
+	// authMW a no-op, so this is harmless when auth is disabled.
+	authMW := auth.Middleware(cfg.APIKey)
+	protect := func(h http.HandlerFunc) http.Handler {
+		return authMW(withCORS(h))
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ingest", collector.IngestHandler(store))
-	mux.HandleFunc("GET /slo/{project_id}", withCORS(slo.StatusHandler(store, cfg.SLOs)))
-	mux.HandleFunc("GET /incidents/{project_id}", withCORS(slo.IncidentsHandler(store)))
-	mux.HandleFunc("GET /metrics/{project_id}", withCORS(metricsHandler(store)))
+	mux.Handle("/ingest", authMW(collector.IngestHandler(store)))
+	mux.Handle("GET /slo/{project_id}", protect(slo.StatusHandler(store, cfg.SLOs)))
+	mux.Handle("GET /incidents/{project_id}", protect(slo.IncidentsHandler(store)))
+	mux.Handle("GET /metrics/{project_id}", protect(metricsHandler(store)))
+	mux.Handle("GET /prometheus/{project_id}", protect(prometheus.Handler(store, cfg.SLOs)))
+	mux.Handle("GET /demo", protect(demo.Handler(store)))
+	// Always public, even with an API key configured — never passed
+	// through authMW.
 	mux.HandleFunc("GET /badge/{project_id}", withCORS(badge.Handler(store, cfg.SLOs)))
-	mux.HandleFunc("GET /prometheus/{project_id}", withCORS(prometheus.Handler(store, cfg.SLOs)))
-	mux.HandleFunc("GET /demo", withCORS(demo.Handler(store)))
-	// A full page a user navigates to directly, not a JSON endpoint fetched
-	// cross-origin by the dashboard — no CORS header needed.
 	mux.HandleFunc("GET /status/{project_id}", status.Handler(store, cfg.SLOs))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
