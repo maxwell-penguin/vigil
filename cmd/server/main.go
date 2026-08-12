@@ -20,6 +20,7 @@ import (
 	"vigil/internal/github"
 	"vigil/internal/models"
 	"vigil/internal/slo"
+	"vigil/internal/status"
 	"vigil/internal/storage"
 )
 
@@ -62,6 +63,9 @@ func main() {
 	mux.HandleFunc("GET /metrics/{project_id}", withCORS(metricsHandler(store)))
 	mux.HandleFunc("GET /badge/{project_id}", withCORS(badge.Handler(store, cfg.SLOs)))
 	mux.HandleFunc("GET /demo", withCORS(demo.Handler(store)))
+	// A full page a user navigates to directly, not a JSON endpoint fetched
+	// cross-origin by the dashboard — no CORS header needed.
+	mux.HandleFunc("GET /status/{project_id}", status.Handler(store, cfg.SLOs))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
