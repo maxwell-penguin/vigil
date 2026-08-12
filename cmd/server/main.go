@@ -20,6 +20,7 @@ import (
 	"vigil/internal/github"
 	"vigil/internal/models"
 	"vigil/internal/notify"
+	"vigil/internal/prometheus"
 	"vigil/internal/slo"
 	"vigil/internal/status"
 	"vigil/internal/storage"
@@ -68,6 +69,7 @@ func main() {
 	mux.HandleFunc("GET /incidents/{project_id}", withCORS(slo.IncidentsHandler(store)))
 	mux.HandleFunc("GET /metrics/{project_id}", withCORS(metricsHandler(store)))
 	mux.HandleFunc("GET /badge/{project_id}", withCORS(badge.Handler(store, cfg.SLOs)))
+	mux.HandleFunc("GET /prometheus/{project_id}", withCORS(prometheus.Handler(store, cfg.SLOs)))
 	mux.HandleFunc("GET /demo", withCORS(demo.Handler(store)))
 	// A full page a user navigates to directly, not a JSON endpoint fetched
 	// cross-origin by the dashboard — no CORS header needed.

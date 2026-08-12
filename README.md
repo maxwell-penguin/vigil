@@ -23,6 +23,7 @@ Vigil tracks your project's uptime and latency, computes a real error-budget SLO
 - 🚨 Auto-opens GitHub Issues with pre-filled postmortem on breach
 - ⏱️ SQLite time-series with automatic 1m/1h downsampling
 - 🏷️ Embeddable SVG README badge showing live uptime
+- 📈 Prometheus-compatible /prometheus/:project_id scrape endpoint
 - 📦 Python + JavaScript SDKs with background batching
 - 🐳 Docker + Fly.io ready, ~9MB image
 
