@@ -42,6 +42,13 @@ type Alert struct {
 	IssueNumber       int       `json:"issue_number,omitempty"`
 	ResolvedAt        time.Time `json:"resolved_at,omitempty"`
 	BudgetConsumedPct float64   `json:"budget_consumed_pct"`
+	// SLOPct/TargetPct/burn rates are a snapshot of Status at the moment the
+	// alert fired, so the incident detail view can show what was true then
+	// even after live SLO% has since recovered.
+	SLOPct        float64 `json:"slo_pct,omitempty"`
+	TargetPct     float64 `json:"target_pct,omitempty"`
+	ShortBurnRate float64 `json:"short_burn_rate,omitempty"`
+	LongBurnRate  float64 `json:"long_burn_rate,omitempty"`
 }
 
 // SLO is a service level objective definition for a project.

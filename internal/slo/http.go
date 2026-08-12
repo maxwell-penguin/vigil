@@ -42,6 +42,10 @@ type Incident struct {
 	BreachDurationSec int64   `json:"breach_duration_sec,omitempty"`
 	Ongoing           bool    `json:"ongoing"`
 	BudgetConsumedPct float64 `json:"budget_consumed_pct"`
+	SLOPct            float64 `json:"slo_pct"`
+	TargetPct         float64 `json:"target_pct"`
+	ShortBurnRate     float64 `json:"short_burn_rate"`
+	LongBurnRate      float64 `json:"long_burn_rate"`
 }
 
 // IncidentsHandler serves GET /incidents/{project_id}.
@@ -61,6 +65,10 @@ func IncidentsHandler(store Store) http.HandlerFunc {
 				FiredAt:           a.FiredAt.Format(time.RFC3339),
 				BudgetConsumedPct: a.BudgetConsumedPct,
 				Ongoing:           a.ResolvedAt.IsZero(),
+				SLOPct:            a.SLOPct,
+				TargetPct:         a.TargetPct,
+				ShortBurnRate:     a.ShortBurnRate,
+				LongBurnRate:      a.LongBurnRate,
 			}
 			if !a.ResolvedAt.IsZero() {
 				inc.ResolvedAt = a.ResolvedAt.Format(time.RFC3339)

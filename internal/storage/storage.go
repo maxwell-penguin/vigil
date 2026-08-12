@@ -40,10 +40,49 @@ CREATE TABLE IF NOT EXISTS slo_alerts (
     fired_at            INTEGER NOT NULL,
     issue_number        INTEGER NOT NULL DEFAULT 0,
     resolved_at         INTEGER NOT NULL DEFAULT 0,
-    budget_consumed_pct REAL    NOT NULL DEFAULT 0
+    budget_consumed_pct REAL    NOT NULL DEFAULT 0,
+    slo_pct             REAL    NOT NULL DEFAULT 0,
+    target_pct          REAL    NOT NULL DEFAULT 0,
+    short_burn_rate     REAL    NOT NULL DEFAULT 0,
+    long_burn_rate      REAL    NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_slo_alerts_proj_ts ON slo_alerts(project_id, fired_at);
 `
+
+// alertSnapshotColumns are the columns added to slo_alerts after its initial
+// release. ADD COLUMN has no IF NOT EXISTS in SQLite, so existing DBs need
+// this to run once and be skipped afterward.
+var alertSnapshotColumns = []string{"slo_pct", "target_pct", "short_burn_rate", "long_burn_rate"}
+
+func migrateAlertColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(slo_alerts)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	have := make(map[string]bool)
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, col := range alertSnapshotColumns {
+		if have[col] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE slo_alerts ADD COLUMN ` + col + ` REAL NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add column %s: %w", col, err)
+		}
+	}
+	return nil
+}
 
 type Store struct {
 	db *sql.DB
@@ -57,6 +96,10 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := migrateAlertColumns(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -204,9 +247,10 @@ func (s *Store) InsertAlert(a models.Alert) error {
 		resolved = a.ResolvedAt.Unix()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO slo_alerts (project_id, fired_at, issue_number, resolved_at, budget_consumed_pct)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO slo_alerts (project_id, fired_at, issue_number, resolved_at, budget_consumed_pct, slo_pct, target_pct, short_burn_rate, long_burn_rate)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ProjectID, a.FiredAt.Unix(), a.IssueNumber, resolved, a.BudgetConsumedPct,
+		a.SLOPct, a.TargetPct, a.ShortBurnRate, a.LongBurnRate,
 	)
 	if err != nil {
 		return fmt.Errorf("insert alert: %w", err)
@@ -222,12 +266,13 @@ func (s *Store) LatestAlert(projectID string) (models.Alert, bool, error) {
 		firedAt, resAt int64
 	)
 	err := s.db.QueryRow(`
-		SELECT project_id, fired_at, issue_number, resolved_at, budget_consumed_pct
+		SELECT project_id, fired_at, issue_number, resolved_at, budget_consumed_pct, slo_pct, target_pct, short_burn_rate, long_burn_rate
 		FROM slo_alerts
 		WHERE project_id = ?
 		ORDER BY fired_at DESC
 		LIMIT 1
-	`, projectID).Scan(&a.ProjectID, &firedAt, &a.IssueNumber, &resAt, &a.BudgetConsumedPct)
+	`, projectID).Scan(&a.ProjectID, &firedAt, &a.IssueNumber, &resAt, &a.BudgetConsumedPct,
+		&a.SLOPct, &a.TargetPct, &a.ShortBurnRate, &a.LongBurnRate)
 	if err == sql.ErrNoRows {
 		return models.Alert{}, false, nil
 	}
@@ -258,7 +303,7 @@ func (s *Store) MarkAlertResolved(projectID string, firedAt, resolvedAt time.Tim
 // ListAlerts returns all alerts for a project, newest first.
 func (s *Store) ListAlerts(projectID string) ([]models.Alert, error) {
 	rows, err := s.db.Query(`
-		SELECT project_id, fired_at, issue_number, resolved_at, budget_consumed_pct
+		SELECT project_id, fired_at, issue_number, resolved_at, budget_consumed_pct, slo_pct, target_pct, short_burn_rate, long_burn_rate
 		FROM slo_alerts
 		WHERE project_id = ?
 		ORDER BY fired_at DESC
@@ -273,7 +318,8 @@ func (s *Store) ListAlerts(projectID string) ([]models.Alert, error) {
 			a              models.Alert
 			firedAt, resAt int64
 		)
-		if err := rows.Scan(&a.ProjectID, &firedAt, &a.IssueNumber, &resAt, &a.BudgetConsumedPct); err != nil {
+		if err := rows.Scan(&a.ProjectID, &firedAt, &a.IssueNumber, &resAt, &a.BudgetConsumedPct,
+			&a.SLOPct, &a.TargetPct, &a.ShortBurnRate, &a.LongBurnRate); err != nil {
 			return nil, err
 		}
 		a.FiredAt = time.Unix(firedAt, 0).UTC()

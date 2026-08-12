@@ -1,3 +1,6 @@
+import { useState } from "react";
+import IncidentDetail from "./IncidentDetail";
+
 const GITHUB_REPO = import.meta.env.VITE_GITHUB_REPO;
 
 function formatDuration(sec) {
@@ -50,6 +53,17 @@ function Icon({ severe }) {
 }
 
 export default function IncidentsTable({ incidents }) {
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  function toggle(key) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   return (
     <div className="card p-5">
       <div className="text-sm font-medium text-ink">Incident history</div>
@@ -59,51 +73,61 @@ export default function IncidentsTable({ incidents }) {
       ) : (
         <div className="mt-1 divide-y divide-line">
           {incidents.map((inc, i) => {
+            const key = `${inc.fired_at}-${i}`;
             const severe = inc.ongoing || inc.budget_consumed_pct >= 50;
+            const isOpen = expanded.has(key);
             return (
-              <div
-                key={`${inc.fired_at}-${i}`}
-                className="flex items-start justify-between gap-4 py-3"
-              >
-                <div className="flex min-w-0 gap-3">
-                  <Icon severe={severe} />
-                  <div className="min-w-0">
-                    <div className="text-sm text-ink">
-                      {inc.ongoing ? "Ongoing error budget breach" : "Error budget breach"}
+              <div key={key}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggle(key)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggle(key)}
+                  className="flex cursor-pointer items-start justify-between gap-4 py-3 hover:bg-subtle"
+                >
+                  <div className="flex min-w-0 gap-3">
+                    <Icon severe={severe} />
+                    <div className="min-w-0">
+                      <div className="text-sm text-ink">
+                        {inc.ongoing ? "Ongoing error budget breach" : "Error budget breach"}
+                      </div>
+                      <div className="mt-0.5 text-xs text-ink-secondary">
+                        <span className="font-mono">{formatTime(inc.fired_at)}</span>
+                        <span className="px-1.5 text-ink-muted">·</span>
+                        {inc.budget_consumed_pct.toFixed(1)}% of budget consumed
+                      </div>
                     </div>
-                    <div className="mt-0.5 text-xs text-ink-secondary">
-                      <span className="font-mono">{formatTime(inc.fired_at)}</span>
-                      <span className="px-1.5 text-ink-muted">·</span>
-                      {inc.budget_consumed_pct.toFixed(1)}% of budget consumed
-                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-4 text-sm">
+                    <span
+                      className={
+                        "font-mono " + (inc.ongoing ? "font-medium text-danger" : "text-ink-secondary")
+                      }
+                    >
+                      {inc.ongoing ? "Ongoing" : formatDuration(inc.breach_duration_sec)}
+                    </span>
+                    {inc.issue_number ? (
+                      GITHUB_REPO ? (
+                        <a
+                          href={`https://github.com/${GITHUB_REPO}/issues/${inc.issue_number}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-accent hover:underline"
+                        >
+                          #{inc.issue_number}
+                        </a>
+                      ) : (
+                        <span className="text-ink-secondary">#{inc.issue_number}</span>
+                      )
+                    ) : (
+                      <span className="text-ink-muted">No issue</span>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-4 text-sm">
-                  <span
-                    className={
-                      "font-mono " + (inc.ongoing ? "font-medium text-danger" : "text-ink-secondary")
-                    }
-                  >
-                    {inc.ongoing ? "Ongoing" : formatDuration(inc.breach_duration_sec)}
-                  </span>
-                  {inc.issue_number ? (
-                    GITHUB_REPO ? (
-                      <a
-                        href={`https://github.com/${GITHUB_REPO}/issues/${inc.issue_number}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-accent hover:underline"
-                      >
-                        #{inc.issue_number}
-                      </a>
-                    ) : (
-                      <span className="text-ink-secondary">#{inc.issue_number}</span>
-                    )
-                  ) : (
-                    <span className="text-ink-muted">No issue</span>
-                  )}
-                </div>
+                {isOpen && <IncidentDetail incident={inc} />}
               </div>
             );
           })}

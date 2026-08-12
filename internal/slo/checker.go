@@ -79,6 +79,10 @@ func (c *Checker) checkAll(now time.Time) {
 			FiredAt:           now,
 			IssueNumber:       issueNumber,
 			BudgetConsumedPct: st.BudgetConsumedPct,
+			SLOPct:            st.SLOPct,
+			TargetPct:         s.TargetPct,
+			ShortBurnRate:     st.ShortBurnRate,
+			LongBurnRate:      st.LongBurnRate,
 		}); err != nil {
 			log.Printf("slo %s: insert alert: %v", s.ProjectID, err)
 		}
