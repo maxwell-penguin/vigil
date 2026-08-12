@@ -124,10 +124,10 @@ func seedBreachIncident(store Store, now time.Time) error {
 		FiredAt:           firedAt,
 		ResolvedAt:        resolvedAt,
 		BudgetConsumedPct: 62.4, // representative snapshot for the demo
-		SLOPct:            89.3,
+		SLOPct:            85.2,
 		TargetPct:         90.0, // matches the "demo" SLO in vigil.yaml.example
-		ShortBurnRate:     18.2,
-		LongBurnRate:      3.6,
+		ShortBurnRate:     18.5,
+		LongBurnRate:      3.2,
 	})
 }
 
