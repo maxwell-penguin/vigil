@@ -5,20 +5,22 @@ import (
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/notify"
 )
 
 // RecentEventsForPostmortem caps how many raw events a Notifier gets per breach.
 const RecentEventsForPostmortem = 5
 
 type Checker struct {
-	Store    Store
-	SLOs     []models.SLO
-	Interval time.Duration
-	Notifier Notifier // optional; nil means log-only
+	Store           Store
+	SLOs            []models.SLO
+	Interval        time.Duration
+	Notifier        Notifier                // optional; nil means log-only
+	WebhookNotifier *notify.WebhookNotifier // optional; nil disables Slack/Discord alerts
 }
 
-func NewChecker(store Store, slos []models.SLO, interval time.Duration, notifier Notifier) *Checker {
-	return &Checker{Store: store, SLOs: slos, Interval: interval, Notifier: notifier}
+func NewChecker(store Store, slos []models.SLO, interval time.Duration, notifier Notifier, webhookNotifier *notify.WebhookNotifier) *Checker {
+	return &Checker{Store: store, SLOs: slos, Interval: interval, Notifier: notifier, WebhookNotifier: webhookNotifier}
 }
 
 func (c *Checker) Run(stop <-chan struct{}) {
@@ -62,28 +64,37 @@ func (c *Checker) checkAll(now time.Time) {
 		log.Printf("ALERT slo=%s slo_pct=%.3f short_burn=%.2f long_burn=%.2f",
 			s.ProjectID, st.SLOPct, st.ShortBurnRate, st.LongBurnRate)
 
-		issueNumber := 0
-		if c.Notifier != nil {
-			events, err := c.Store.FetchRecentRawEvents(s.ProjectID, RecentEventsForPostmortem)
-			if err != nil {
-				log.Printf("slo %s: fetch recent events: %v", s.ProjectID, err)
-			}
-			issueNumber, err = c.Notifier.NotifyBreach(s, st, events, now)
-			if err != nil {
-				log.Printf("slo %s: notify: %v", s.ProjectID, err)
-			}
-		}
-
-		if err := c.Store.InsertAlert(models.Alert{
+		alert := models.Alert{
 			ProjectID:         s.ProjectID,
 			FiredAt:           now,
-			IssueNumber:       issueNumber,
 			BudgetConsumedPct: st.BudgetConsumedPct,
 			SLOPct:            st.SLOPct,
 			TargetPct:         s.TargetPct,
 			ShortBurnRate:     st.ShortBurnRate,
 			LongBurnRate:      st.LongBurnRate,
-		}); err != nil {
+		}
+
+		if c.Notifier != nil {
+			events, err := c.Store.FetchRecentRawEvents(s.ProjectID, RecentEventsForPostmortem)
+			if err != nil {
+				log.Printf("slo %s: fetch recent events: %v", s.ProjectID, err)
+			}
+			issueNumber, err := c.Notifier.NotifyBreach(s, st, events, now)
+			if err != nil {
+				log.Printf("slo %s: notify: %v", s.ProjectID, err)
+			}
+			alert.IssueNumber = issueNumber
+		}
+
+		// Independent of the GitHub notifier above: a failing webhook is
+		// logged and never blocks the issue notification or the alert record.
+		if c.WebhookNotifier != nil {
+			if err := c.WebhookNotifier.Notify(alert, s.ProjectID); err != nil {
+				log.Printf("slo %s: webhook notify: %v", s.ProjectID, err)
+			}
+		}
+
+		if err := c.Store.InsertAlert(alert); err != nil {
 			log.Printf("slo %s: insert alert: %v", s.ProjectID, err)
 		}
 	}

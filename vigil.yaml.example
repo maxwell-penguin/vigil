@@ -5,6 +5,10 @@ port: 8080
 github_token: ""
 github_repo: "" # owner/repo
 
+# Optional: Slack or Discord webhook for breach notifications
+webhook_url: ""
+webhook_type: "slack" # or "discord"
+
 probes:
   - project_id: example-site
     url: https://example.com

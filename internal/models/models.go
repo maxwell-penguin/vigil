@@ -68,4 +68,6 @@ type Config struct {
 	SLOs        []SLO         `yaml:"slos"`
 	GitHubToken string        `yaml:"github_token"`
 	GitHubRepo  string        `yaml:"github_repo"` // "owner/repo"
+	WebhookURL  string        `yaml:"webhook_url"`
+	WebhookType string        `yaml:"webhook_type"` // "slack" or "discord"
 }

@@ -19,6 +19,7 @@ import (
 	"vigil/internal/demo"
 	"vigil/internal/github"
 	"vigil/internal/models"
+	"vigil/internal/notify"
 	"vigil/internal/slo"
 	"vigil/internal/status"
 	"vigil/internal/storage"
@@ -50,11 +51,16 @@ func main() {
 		log.Printf("github_token/github_repo not set: SLO breaches will only be logged")
 	}
 
+	var webhookNotifier *notify.WebhookNotifier
+	if cfg.WebhookURL != "" {
+		webhookNotifier = notify.NewWebhookNotifier(cfg.WebhookURL, cfg.WebhookType)
+	}
+
 	stop := make(chan struct{})
 
 	go collector.NewProber(cfg.Probes, store, 30*time.Second).Run(stop)
 	go store.RunDownsampleLoop(1*time.Hour, stop)
-	go slo.NewChecker(store, cfg.SLOs, 60*time.Second, notifier).Run(stop)
+	go slo.NewChecker(store, cfg.SLOs, 60*time.Second, notifier, webhookNotifier).Run(stop)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ingest", collector.IngestHandler(store))

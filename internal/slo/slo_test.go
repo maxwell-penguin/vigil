@@ -56,7 +56,7 @@ func TestComputeBreaches(t *testing.T) {
 	// no alert yet; feed to checker (no Notifier) to fire one.
 	c := NewChecker(s, []models.SLO{{
 		ProjectID: "p", TargetPct: 99, LatencyThresholdMS: 1000, WindowDays: 30,
-	}}, time.Minute, nil)
+	}}, time.Minute, nil, nil)
 	c.checkAll(now.Add(time.Second))
 	if _, ok, err := s.LatestAlert("p"); err != nil || !ok {
 		t.Fatalf("expected alert row, ok=%v err=%v", ok, err)
