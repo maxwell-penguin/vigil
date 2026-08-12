@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://vigil-calm-cherry-433.fly.dev";
 
 async function getJSON(path) {
   const res = await fetch(`${API_BASE}${path}`);
