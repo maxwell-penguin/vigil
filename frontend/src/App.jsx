@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useDashboardData } from "./hooks/useDashboardData";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
-import StatCards, { SLOCards } from "./components/StatCards";
+import StatCards, { SLOCards, BurnTrajectoryBanner } from "./components/StatCards";
 import BurnRateMeters from "./components/BurnRateMeters";
 import LatencyChart from "./components/LatencyChart";
 import IncidentsTable from "./components/IncidentsTable";
@@ -41,6 +41,7 @@ export default function App() {
             slo && (
               <>
                 <StatCards slo={slo} metrics={metrics} incidents={incidents} />
+                <BurnTrajectoryBanner slo={slo} />
                 <SLOCards slo={slo} metrics={metrics} />
                 <BurnRateMeters slo={slo} />
                 <LatencyChart metrics={metrics} />

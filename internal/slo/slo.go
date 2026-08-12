@@ -26,13 +26,15 @@ type Notifier interface {
 
 // Status is the computed SLO state, matching the /slo/:project_id response shape.
 type Status struct {
-	ProjectID          string  `json:"project_id"`
-	SLOPct             float64 `json:"slo_pct"`
-	BudgetConsumedPct  float64 `json:"budget_consumed_pct"`
-	BudgetRemainingPct float64 `json:"budget_remaining_pct"`
-	ShortBurnRate      float64 `json:"short_burn_rate"`
-	LongBurnRate       float64 `json:"long_burn_rate"`
-	IsBreaching        bool    `json:"is_breaching"`
+	ProjectID                string  `json:"project_id"`
+	SLOPct                   float64 `json:"slo_pct"`
+	BudgetConsumedPct        float64 `json:"budget_consumed_pct"`
+	BudgetRemainingPct       float64 `json:"budget_remaining_pct"`
+	ShortBurnRate            float64 `json:"short_burn_rate"`
+	LongBurnRate             float64 `json:"long_burn_rate"`
+	IsBreaching              bool    `json:"is_breaching"`
+	DaysUntilBudgetExhausted float64 `json:"days_until_budget_exhausted"` // -1 if not burning, 0 if already exhausted
+	BurnTrajectory           string  `json:"burn_trajectory"`             // "healthy", "warning", "critical", "exhausted"
 }
 
 const (
@@ -100,14 +102,39 @@ func Compute(s Store, slo models.SLO, now time.Time) (Status, error) {
 		longBurn = longRate / budgetFrac
 	}
 
+	// ponytail: the task's formula multiplies in an extra (1 - slo_pct/100)
+	// factor, but long_burn_rate above is already error_rate / allowed_error_rate
+	// — by that definition, burn_rate=1.0 exhausts the *whole* budget in exactly
+	// window_days, so days-to-exhaust the *remaining* budget is just
+	// (remaining_fraction * window_days) / burn_rate. The extra factor would
+	// double-count the error rate and overstate the runway by roughly
+	// 1/(1-slo_pct/100)x.
+	daysUntilExhausted := -1.0
+	trajectory := "healthy"
+	switch {
+	case budgetRemaining <= 0:
+		daysUntilExhausted = 0
+		trajectory = "exhausted"
+	case longBurn > 0:
+		daysUntilExhausted = (budgetRemaining / 100) * float64(slo.WindowDays) / longBurn
+		switch {
+		case daysUntilExhausted < 2:
+			trajectory = "critical"
+		case daysUntilExhausted < 7:
+			trajectory = "warning"
+		}
+	}
+
 	return Status{
-		ProjectID:          slo.ProjectID,
-		SLOPct:             sloPct,
-		BudgetConsumedPct:  budgetConsumed,
-		BudgetRemainingPct: budgetRemaining,
-		ShortBurnRate:      shortBurn,
-		LongBurnRate:       longBurn,
-		IsBreaching:        shortBurn > ShortBurnThreshold && longBurn > LongBurnThreshold,
+		ProjectID:                slo.ProjectID,
+		SLOPct:                   sloPct,
+		BudgetConsumedPct:        budgetConsumed,
+		BudgetRemainingPct:       budgetRemaining,
+		ShortBurnRate:            shortBurn,
+		LongBurnRate:             longBurn,
+		IsBreaching:              shortBurn > ShortBurnThreshold && longBurn > LongBurnThreshold,
+		DaysUntilBudgetExhausted: daysUntilExhausted,
+		BurnTrajectory:           trajectory,
 	}, nil
 }
 

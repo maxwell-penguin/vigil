@@ -94,6 +94,34 @@ export default function StatCards({ slo, metrics, incidents }) {
   );
 }
 
+// Proactive warning shown between the two stat rows and the burn rate
+// monitor — only when the current burn rate would exhaust the budget soon.
+// Healthy/exhausted/not-burning states render nothing (exhausted already
+// has its own "Outage"-style signal elsewhere; this banner is specifically
+// the "you're about to breach" heads-up).
+export function BurnTrajectoryBanner({ slo }) {
+  const trajectory = slo.burn_trajectory;
+  if (trajectory !== "warning" && trajectory !== "critical") return null;
+
+  const critical = trajectory === "critical";
+  const days = Math.round(slo.days_until_budget_exhausted);
+
+  return (
+    <div
+      className={
+        "rounded-md border px-4 py-3 text-sm font-medium " +
+        (critical
+          ? "border-[#fecaca] bg-[#fee2e2] text-[#991b1b]"
+          : "border-[#fde68a] bg-[#fef3c7] text-[#92400e]")
+      }
+    >
+      {critical
+        ? `🔴 Error budget exhausts in ${days} days at current rate`
+        : `⚠️ At current burn rate, error budget exhausts in ${days} days`}
+    </div>
+  );
+}
+
 function Bar({ pct, color }) {
   return (
     <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-line">
