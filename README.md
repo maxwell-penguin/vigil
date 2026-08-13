@@ -162,6 +162,10 @@ Authorization: Bearer your-secret-key-here
 
 Generate a strong key with: `openssl rand -hex 32`
 
+Rate limiting: `/ingest` is rate-limited to 100 events/second per project
+(burst of 500) to prevent accidental SDK misconfiguration from overwhelming
+the database.
+
 ## Project Structure
 
 ```

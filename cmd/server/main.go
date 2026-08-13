@@ -22,6 +22,7 @@ import (
 	"vigil/internal/models"
 	"vigil/internal/notify"
 	"vigil/internal/prometheus"
+	"vigil/internal/ratelimit"
 	"vigil/internal/slo"
 	"vigil/internal/status"
 	"vigil/internal/storage"
@@ -77,7 +78,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/ingest", authMW(collector.IngestHandler(store)))
+	mux.Handle("POST /ingest", authMW(ratelimit.Middleware(collector.IngestHandler(store))))
 	mux.Handle("GET /slo/{project_id}", protect(slo.StatusHandler(store, cfg.SLOs)))
 	mux.Handle("GET /incidents/{project_id}", protect(slo.IncidentsHandler(store)))
 	mux.Handle("GET /metrics/{project_id}", protect(metricsHandler(store)))
