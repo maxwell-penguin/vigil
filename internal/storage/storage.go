@@ -20,77 +20,6 @@ const (
 	eventFlushInterval = 500 * time.Millisecond
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS raw_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id  TEXT    NOT NULL,
-    timestamp   INTEGER NOT NULL,
-    latency_ms  INTEGER NOT NULL,
-    status_code INTEGER NOT NULL,
-    error       INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_raw_ts       ON raw_events(timestamp);
-CREATE INDEX IF NOT EXISTS idx_raw_proj_ts  ON raw_events(project_id, timestamp);
-
-CREATE TABLE IF NOT EXISTS aggregated_metrics (
-    project_id   TEXT    NOT NULL,
-    bucket_start INTEGER NOT NULL,
-    resolution   TEXT    NOT NULL,
-    good_events  INTEGER NOT NULL,
-    total_events INTEGER NOT NULL,
-    PRIMARY KEY (project_id, bucket_start, resolution)
-);
-CREATE INDEX IF NOT EXISTS idx_agg_proj_ts ON aggregated_metrics(project_id, bucket_start);
-
-CREATE TABLE IF NOT EXISTS slo_alerts (
-    project_id          TEXT    NOT NULL,
-    fired_at            INTEGER NOT NULL,
-    issue_number        INTEGER NOT NULL DEFAULT 0,
-    resolved_at         INTEGER NOT NULL DEFAULT 0,
-    budget_consumed_pct REAL    NOT NULL DEFAULT 0,
-    slo_pct             REAL    NOT NULL DEFAULT 0,
-    target_pct          REAL    NOT NULL DEFAULT 0,
-    short_burn_rate     REAL    NOT NULL DEFAULT 0,
-    long_burn_rate      REAL    NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_slo_alerts_proj_ts ON slo_alerts(project_id, fired_at);
-`
-
-// alertSnapshotColumns are the columns added to slo_alerts after its initial
-// release. ADD COLUMN has no IF NOT EXISTS in SQLite, so existing DBs need
-// this to run once and be skipped afterward.
-var alertSnapshotColumns = []string{"slo_pct", "target_pct", "short_burn_rate", "long_burn_rate"}
-
-func migrateAlertColumns(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(slo_alerts)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	have := make(map[string]bool)
-	for rows.Next() {
-		var cid, notnull, pk int
-		var name, ctype string
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		have[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, col := range alertSnapshotColumns {
-		if have[col] {
-			continue
-		}
-		if _, err := db.Exec(`ALTER TABLE slo_alerts ADD COLUMN ` + col + ` REAL NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("add column %s: %w", col, err)
-		}
-	}
-	return nil
-}
-
 type Store struct {
 	db         *sql.DB
 	eventQueue chan []models.Event
@@ -119,13 +48,9 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set pragmas: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := RunMigrations(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("apply schema: %w", err)
-	}
-	if err := migrateAlertColumns(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 	return &Store{db: db, eventQueue: make(chan []models.Event, eventQueueSize)}, nil
 }
