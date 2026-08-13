@@ -22,6 +22,9 @@ probes:
   - project_id: httpbin-ok
     url: https://httpbin.org/status/200
     expected_status: 200
+  - project_id: maxwell-portfolio
+    url: https://maxwellpeng.com
+    expected_status: 200
   # Only resolves inside the docker-compose network — harmless probe
   # failures if you run `go run ./cmd/server` outside Docker.
   - project_id: demo-app
@@ -36,6 +39,10 @@ slos:
   - project_id: demo-app
     target_pct: 99.5
     latency_threshold_ms: 200
+    window_days: 30
+  - project_id: maxwell-portfolio
+    target_pct: 99.5
+    latency_threshold_ms: 500
     window_days: 30
   # Powers the GET /demo seed endpoint — hit it once, then point the
   # dashboard at project "demo" to see it populated instantly.
