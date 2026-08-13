@@ -19,8 +19,11 @@ func TestDownsampleRollsUpAndDeletes(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
-	old := now.Add(-48 * time.Hour)    // must roll into 1m
-	fresh := now.Add(-1 * time.Minute) // must stay raw
+	// Truncate to a minute boundary so old, old+1s, old+2s below can never
+	// straddle a 1m bucket edge — without this the test is flaky depending
+	// on what second it happens to run at.
+	old := now.Truncate(time.Minute).Add(-48 * time.Hour) // must roll into 1m
+	fresh := now.Add(-1 * time.Minute)                    // must stay raw
 
 	// InsertEvent only queues for the async writer; StartWriter isn't
 	// running in this test, so seed directly via InsertEventsBatch instead.
