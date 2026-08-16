@@ -44,6 +44,7 @@ Drop a live status badge in your own README:
 - [Quick Start](#quick-start)
 - [How Breach Detection Works](#how-breach-detection-works)
 - [Architecture](#architecture)
+- [Design Decisions & Limitations](#design-decisions--limitations)
 - [Badge](#badge)
 - [Status Pages](#status-pages)
 - [Deployment](#deployment)
@@ -89,22 +90,66 @@ minutes instead of after it's already eaten your whole month's budget.
 
 ```
   Python/JS SDK   ─┐
-                    ├─▶  POST /ingest  ─▶  Vigil Server (Go, :8080)
-  External Prober  ─┘                              │
-                              ┌───────────────────┼────────────────────┐
-                              ▼                    ▼                    ▼
-                          SQLite              SLO Engine        GET /slo, /metrics,
-                          storage          (burn-rate check)    /badge, /incidents
-                                                  │                     │
-                                                  ▼                     ▼
-                                            GitHub Issues            Dashboard
-                                             (on breach)           (React + Vite)
+                    ├─▶  POST /ingest  ─▶  Auth  ─▶  Rate Limiter
+  External Prober  ─┘                                     │
+                                                            ▼
+                                                   Async Write Queue
+                                                   (buffered chan, 1000)
+                                                            │
+                                                            ▼
+                                                       SQLite (WAL)
+                                                  (batched writes, 100 events
+                                                   or 500ms, whichever first)
+                                                            │
+                              ┌─────────────────────────────┼─────────────────────────────┐
+                              ▼                              ▼                              ▼
+                          SLO Engine                  GET /slo, /metrics,           GET /status,
+                        (burn-rate check)              /badge, /incidents,           /prometheus
+                              │                         /healthz
+                              ▼
+                    GitHub Issues + Slack/Discord
+                         (on breach)
+                              │
+                           Dashboard
+                          (React + Vite)
 ```
 
 Two ways to get events in — push from your own code with the SDK, or let
 vigil's built-in prober poll a URL every 30s — both land on the same
-`/ingest` endpoint. Everything downstream (SQLite, the SLO engine, GitHub
-issues, the dashboard) doesn't know or care which one produced the data.
+`/ingest` endpoint. Everything downstream (the write queue, SQLite, the SLO
+engine, GitHub issues, the dashboard) doesn't know or care which one
+produced the data.
+
+## Design Decisions & Limitations
+
+Vigil is deliberately scoped for indie open source maintainers — a single
+project owner monitoring 1-10 services, not a fleet.
+
+**SQLite over Postgres:** Single-writer SQLite with WAL mode is appropriate
+for this scale. The async write queue (buffered channel, capacity 1000,
+batched in groups of 100 or 500ms) serializes all writes and eliminates
+lock contention. If the queue fills (>1000 pending batches), new events are
+dropped and logged — ingest is best-effort, not guaranteed delivery. This
+is the correct tradeoff for observability data: losing a few events under
+extreme load is better than blocking your application's request handlers.
+
+**Single-region deployment:** Vigil runs in one Fly.io region. If that
+region has an outage, alerting stops. For a solo maintainer this is
+acceptable; for a team, run a second instance in another region.
+
+**Single API key:** Authentication uses one shared key per Vigil instance.
+This is appropriate for a self-hosted tool where the operator and the user
+are the same person. Multi-tenant key management is out of scope.
+
+**Horizontal scaling:** Not supported. SQLite's single-writer model means
+you can't run multiple Vigil instances against the same database. If you
+need horizontal scale, migrate to Postgres and replace the write queue with
+a connection pool.
+
+**Webhook delivery:** Slack/Discord notifications are fire-and-forget with
+no retry — if the webhook endpoint is down during a breach, the
+notification is lost. GitHub Issues are more reliable as the primary
+incident record.
 
 ## Badge
 
