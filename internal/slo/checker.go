@@ -6,6 +6,7 @@ import (
 
 	"vigil/internal/models"
 	"vigil/internal/notify"
+	"vigil/internal/selfmetrics"
 )
 
 // RecentEventsForPostmortem caps how many raw events a Notifier gets per breach.
@@ -42,6 +43,7 @@ func (c *Checker) Run(stop <-chan struct{}) {
 }
 
 func (c *Checker) checkAll(now time.Time) {
+	selfmetrics.SLOChecksRun.Add(1)
 	for _, s := range c.SLOs {
 		st, err := Compute(c.Store, s, now)
 		if err != nil {

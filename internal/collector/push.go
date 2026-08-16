@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 )
 
 type Ingester interface {
@@ -79,6 +80,7 @@ func IngestHandler(store Ingester) http.HandlerFunc {
 				return
 			}
 		}
+		selfmetrics.IngestEventsReceived.Add(int64(len(events)))
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, `{"accepted":%d}`, len(events))
 	}

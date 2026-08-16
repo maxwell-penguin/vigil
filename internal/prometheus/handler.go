@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 	"vigil/internal/slo"
 	"vigil/internal/storage"
 )
@@ -85,5 +86,37 @@ func Handler(store *storage.Store, slos []models.SLO) http.HandlerFunc {
 		fmt.Fprintf(w, "# HELP vigil_p99_latency_ms Current p99 latency in milliseconds\n")
 		fmt.Fprintf(w, "# TYPE vigil_p99_latency_ms gauge\n")
 		fmt.Fprintf(w, "vigil_p99_latency_ms{project_id=%q} %.1f\n", id, float64(p99))
+	}
+}
+
+// SelfHandler serves GET /prometheus/vigil-internal: vigil's own operational
+// health, as opposed to the per-project metrics Handler above.
+func SelfHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+
+		fmt.Fprintf(w, "# HELP vigil_internal_ingest_received_total Total events received\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_ingest_received_total counter\n")
+		fmt.Fprintf(w, "vigil_internal_ingest_received_total %d\n\n", selfmetrics.IngestEventsReceived.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_ingest_dropped_total Events dropped (queue full)\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_ingest_dropped_total counter\n")
+		fmt.Fprintf(w, "vigil_internal_ingest_dropped_total %d\n\n", selfmetrics.IngestEventsDropped.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_write_queue_depth Current async write queue depth\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_write_queue_depth gauge\n")
+		fmt.Fprintf(w, "vigil_internal_write_queue_depth %d\n\n", selfmetrics.WriteQueueDepth.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_webhook_failures_total Webhook delivery failures\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_webhook_failures_total counter\n")
+		fmt.Fprintf(w, "vigil_internal_webhook_failures_total %d\n\n", selfmetrics.WebhookFailures.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_github_failures_total GitHub issue creation failures\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_github_failures_total counter\n")
+		fmt.Fprintf(w, "vigil_internal_github_failures_total %d\n\n", selfmetrics.GitHubIssueFailures.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_slo_checks_total Total SLO check cycles completed\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_slo_checks_total counter\n")
+		fmt.Fprintf(w, "vigil_internal_slo_checks_total %d\n", selfmetrics.SLOChecksRun.Load())
 	}
 }
