@@ -77,12 +77,23 @@ func TestRunMigrations_Idempotent(t *testing.T) {
 	}
 }
 
+func descriptionForVersion(t *testing.T, version int) string {
+	t.Helper()
+	for _, m := range Migrations {
+		if m.Version == version {
+			return m.Description
+		}
+	}
+	t.Fatalf("no migration with version %d", version)
+	return ""
+}
+
 // TestRunMigrations_PreExistingColumns reproduces the live Fly.io DB: a
 // database that predates the migration system, whose slo_alerts table
 // already has the columns migrations 2 and 3 would add (from the old
 // ALTER TABLE guards), but with no schema_migrations table at all.
-// RunMigrations must backfill tracking rows instead of re-running the ALTER
-// TABLE statements and failing with "duplicate column name".
+// RunMigrations must tolerate "duplicate column name" per-statement instead
+// of failing the whole migration.
 func TestRunMigrations_PreExistingColumns(t *testing.T) {
 	db := openTestDB(t)
 
@@ -137,12 +148,12 @@ CREATE TABLE slo_alerts (
 			Scan(&version, &description); err != nil {
 			t.Fatalf("row for version %d: %v", v, err)
 		}
-		if description != descriptionForVersion(v) {
-			t.Errorf("version %d: description = %q, want %q", v, description, descriptionForVersion(v))
+		if want := descriptionForVersion(t, v); description != want {
+			t.Errorf("version %d: description = %q, want %q", v, description, want)
 		}
 	}
 
-	// Re-running must still be a no-op (idempotency after backfill).
+	// Re-running must still be a no-op.
 	if err := RunMigrations(db); err != nil {
 		t.Fatalf("second RunMigrations: %v", err)
 	}
@@ -151,5 +162,46 @@ CREATE TABLE slo_alerts (
 	}
 	if count != len(Migrations) {
 		t.Fatalf("schema_migrations has %d rows after re-run, want %d", count, len(Migrations))
+	}
+}
+
+// TestRunMigrations_PartialFailureRetry reproduces the actual production
+// crash: migration 1 committed and was recorded (current = 1), but the
+// slo_alerts table already carried migration 2 and 3's columns (from the
+// pre-migration ALTER TABLE guards), so a naive re-run of migration 2 hit
+// "duplicate column name" on every retry — current never drops back to 0,
+// so any fix gated on "current == 0" never engages. RunMigrations must
+// succeed regardless of what current is.
+func TestRunMigrations_PartialFailureRetry(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("seed via first RunMigrations: %v", err)
+	}
+	// Roll schema_migrations back to just after migration 1, as if 2 and 3
+	// never got recorded — the columns are still there from migration 1's
+	// original run (or pre-migration guards), only the bookkeeping regressed.
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version > 1`); err != nil {
+		t.Fatalf("simulate partial failure: %v", err)
+	}
+
+	var current int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&current); err != nil {
+		t.Fatalf("read current version: %v", err)
+	}
+	if current != 1 {
+		t.Fatalf("test setup: current = %d, want 1", current)
+	}
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations after partial failure: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
+		t.Fatalf("count schema_migrations: %v", err)
+	}
+	if count != len(Migrations) {
+		t.Fatalf("schema_migrations has %d rows, want %d", count, len(Migrations))
 	}
 }

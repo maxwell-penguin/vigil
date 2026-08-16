@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 )
 
 type Migration struct {
@@ -89,36 +90,8 @@ func RunMigrations(db *sql.DB) error {
 		return fmt.Errorf("query current schema version: %w", err)
 	}
 
-	// A DB that predates the migration system may already carry the columns
-	// migrations 2 and 3 add — they ran as raw ALTER TABLE guards before
-	// schema_migrations existed. ADD COLUMN has no IF NOT EXISTS in SQLite,
-	// so re-running them fails with "duplicate column name"; detect that
-	// state and backfill the tracking rows instead of re-applying the SQL.
-	// Migration 1 (CREATE TABLE/INDEX IF NOT EXISTS) is left to run through
-	// the normal loop below — it's idempotent against the existing tables
-	// and still needs to be recorded.
-	backfilled := make(map[int]bool)
-	if current == 0 {
-		hasIssueNumber, err := sloAlertsHasColumn(db, "issue_number")
-		if err != nil {
-			return fmt.Errorf("check pre-migration schema: %w", err)
-		}
-		if hasIssueNumber {
-			for _, v := range []int{2, 3} {
-				log.Printf("migration %d already applied via pre-migration ALTER TABLE guards; backfilling schema_migrations", v)
-				if _, err := db.Exec(
-					`INSERT INTO schema_migrations (version, description) VALUES (?, ?)`,
-					v, descriptionForVersion(v),
-				); err != nil {
-					return fmt.Errorf("backfill migration %d: %w", v, err)
-				}
-				backfilled[v] = true
-			}
-		}
-	}
-
 	for _, m := range Migrations {
-		if m.Version <= current || backfilled[m.Version] {
+		if m.Version <= current {
 			continue
 		}
 		log.Printf("applying migration %d: %s", m.Version, m.Description)
@@ -127,10 +100,25 @@ func RunMigrations(db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("begin migration %d: %w", m.Version, err)
 		}
-		if _, err := tx.Exec(m.SQL); err != nil {
+
+		stmts := splitStatements(m.SQL)
+		if isAlterTableOnly(stmts) {
+			// ADD COLUMN has no IF NOT EXISTS in SQLite. DBs that predate
+			// the migration system (or a prior run that got partway
+			// through) may already have some or all of these columns —
+			// run each statement on its own and tolerate "duplicate
+			// column name" rather than failing the whole migration.
+			for _, stmt := range stmts {
+				if err := addColumnIfNotExists(tx, stmt); err != nil {
+					tx.Rollback()
+					return fmt.Errorf("apply migration %d: %w", m.Version, err)
+				}
+			}
+		} else if _, err := tx.Exec(m.SQL); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("apply migration %d: %w", m.Version, err)
 		}
+
 		if _, err := tx.Exec(
 			`INSERT INTO schema_migrations (version, description) VALUES (?, ?)`,
 			m.Version, m.Description,
@@ -145,34 +133,41 @@ func RunMigrations(db *sql.DB) error {
 	return nil
 }
 
-// sloAlertsHasColumn reports whether slo_alerts already has the given
-// column. False (with no error) if the table doesn't exist yet — a fresh DB
-// just takes the normal migration path.
-func sloAlertsHasColumn(db *sql.DB, column string) (bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(slo_alerts)`)
-	if err != nil {
-		return false, err
+// addColumnIfNotExists runs a single ALTER TABLE ... ADD COLUMN statement,
+// treating "duplicate column name" as success since that just means the
+// column is already there.
+func addColumnIfNotExists(tx *sql.Tx, stmt string) error {
+	_, err := tx.Exec(stmt)
+	if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+		return nil
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notnull, pk int
-		var name, ctype string
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
+	return err
 }
 
-func descriptionForVersion(version int) string {
-	for _, m := range Migrations {
-		if m.Version == version {
-			return m.Description
+// splitStatements breaks a semicolon-separated block of SQL into its
+// individual statements, dropping empty ones.
+func splitStatements(sql string) []string {
+	var stmts []string
+	for _, stmt := range strings.Split(sql, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt != "" {
+			stmts = append(stmts, stmt)
 		}
 	}
-	return ""
+	return stmts
+}
+
+// isAlterTableOnly reports whether every statement is an ALTER TABLE —
+// migrations 2 and 3 are ADD COLUMN-only, so they run through the
+// duplicate-tolerant path instead of a single all-or-nothing exec.
+func isAlterTableOnly(stmts []string) bool {
+	if len(stmts) == 0 {
+		return false
+	}
+	for _, stmt := range stmts {
+		if !strings.HasPrefix(strings.ToUpper(stmt), "ALTER TABLE") {
+			return false
+		}
+	}
+	return true
 }
