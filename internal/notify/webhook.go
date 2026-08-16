@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 )
 
 const footerIconURL = "https://github.com/maxwell-penguin/vigil"
@@ -27,7 +28,13 @@ func NewWebhookNotifier(url, webhookType string) *WebhookNotifier {
 // Notify posts a breach summary to the configured webhook. Callers should
 // log the returned error rather than treat it as fatal — a dead webhook
 // must never stop the SLO checker from recording the alert.
-func (w *WebhookNotifier) Notify(alert models.Alert, projectID string) error {
+func (w *WebhookNotifier) Notify(alert models.Alert, projectID string) (err error) {
+	defer func() {
+		if err != nil {
+			selfmetrics.WebhookFailures.Add(1)
+		}
+	}()
+
 	var payload any
 	if w.Type == "discord" {
 		payload = discordPayload(alert, projectID)

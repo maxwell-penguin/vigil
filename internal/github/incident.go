@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 	"vigil/internal/slo"
 )
 
@@ -46,6 +47,7 @@ func (m *IncidentManager) NotifyBreach(s models.SLO, status slo.Status, events [
 	body := postmortemBody(s, status, events, now)
 	issue, err := m.Client.CreateIssue(title, body, []string{"incident", "slo-breach"})
 	if err != nil {
+		selfmetrics.GitHubIssueFailures.Add(1)
 		return 0, fmt.Errorf("create issue: %w", err)
 	}
 	return issue.Number, nil

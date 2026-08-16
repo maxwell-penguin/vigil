@@ -83,6 +83,8 @@ func main() {
 	mux.Handle("GET /incidents/{project_id}", protect(slo.IncidentsHandler(store)))
 	mux.Handle("GET /metrics/{project_id}", protect(metricsHandler(store)))
 	mux.Handle("GET /prometheus/{project_id}", protect(prometheus.Handler(store, cfg.SLOs)))
+	// Always public, same as /healthz — internal observability, not project data.
+	mux.HandleFunc("GET /prometheus/vigil-internal", prometheus.SelfHandler())
 	mux.Handle("GET /demo", protect(demo.Handler(store)))
 	// Always public, even with an API key configured — never passed
 	// through authMW.

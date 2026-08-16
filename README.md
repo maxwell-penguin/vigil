@@ -146,6 +146,9 @@ fly volumes create vigil_data --size 1
 flyctl deploy
 ```
 
+Vigil monitors itself at GET /prometheus/vigil-internal — queue depth,
+dropped events, webhook failures, and SLO check cycles in Prometheus format.
+
 ## Security
 
 Set `api_key` in `vigil.yaml` to protect all endpoints except

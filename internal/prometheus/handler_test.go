@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 	"vigil/internal/storage"
 )
 
@@ -108,5 +109,66 @@ func TestHandlerUnknownProjectReturns404(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestSelfHandlerExposesMetrics(t *testing.T) {
+	// Counters are process-global, so assert on the delta this test causes
+	// rather than absolute values — robust to other tests/runs touching them.
+	baseReceived := selfmetrics.IngestEventsReceived.Load()
+	baseDropped := selfmetrics.IngestEventsDropped.Load()
+	baseWebhook := selfmetrics.WebhookFailures.Load()
+	baseGitHub := selfmetrics.GitHubIssueFailures.Load()
+	baseChecks := selfmetrics.SLOChecksRun.Load()
+
+	selfmetrics.IngestEventsReceived.Add(5)
+	selfmetrics.IngestEventsDropped.Add(2)
+	selfmetrics.WriteQueueDepth.Store(7)
+	selfmetrics.WebhookFailures.Add(3)
+	selfmetrics.GitHubIssueFailures.Add(1)
+	selfmetrics.SLOChecksRun.Add(42)
+
+	req := httptest.NewRequest(http.MethodGet, "/prometheus/vigil-internal", nil)
+	rec := httptest.NewRecorder()
+	SelfHandler()(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+
+	body := rec.Body.String()
+	want := map[string]int64{
+		"vigil_internal_ingest_received_total":  baseReceived + 5,
+		"vigil_internal_ingest_dropped_total":   baseDropped + 2,
+		"vigil_internal_write_queue_depth":      7,
+		"vigil_internal_webhook_failures_total": baseWebhook + 3,
+		"vigil_internal_github_failures_total":  baseGitHub + 1,
+		"vigil_internal_slo_checks_total":       baseChecks + 42,
+	}
+	for name, wantVal := range want {
+		if !strings.Contains(body, "# HELP "+name+" ") {
+			t.Errorf("missing HELP line for %s\nbody:\n%s", name, body)
+		}
+		if !strings.Contains(body, "# TYPE "+name+" ") {
+			t.Errorf("missing TYPE line for %s\nbody:\n%s", name, body)
+		}
+
+		re := regexp.MustCompile(`(?m)^` + name + ` (\S+)$`)
+		match := re.FindStringSubmatch(body)
+		if match == nil {
+			t.Errorf("missing metric line for %s\nbody:\n%s", name, body)
+			continue
+		}
+		got, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil {
+			t.Errorf("%s value %q is not an integer: %v", name, match[1], err)
+			continue
+		}
+		if got != wantVal {
+			t.Errorf("%s = %d, want %d", name, got, wantVal)
+		}
 	}
 }

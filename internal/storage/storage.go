@@ -12,6 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 )
 
 const (
@@ -65,6 +66,7 @@ func (s *Store) InsertEvent(e models.Event) error {
 	select {
 	case s.eventQueue <- []models.Event{e}:
 	default:
+		selfmetrics.IngestEventsDropped.Add(1)
 		log.Printf("event queue full: dropping event for project %s", e.ProjectID)
 	}
 	return nil
@@ -97,6 +99,7 @@ func (s *Store) StartWriter(ctx context.Context) {
 				flush()
 				return
 			case events := <-s.eventQueue:
+				selfmetrics.WriteQueueDepth.Store(int64(len(s.eventQueue)))
 				batch = append(batch, events...)
 				if len(batch) >= eventBatchSize {
 					flush()
