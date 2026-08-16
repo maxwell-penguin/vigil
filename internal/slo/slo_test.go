@@ -1,6 +1,7 @@
 package slo
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -187,4 +188,215 @@ func TestComputeBurnTrajectory(t *testing.T) {
 			t.Fatalf("got trajectory=%q days=%v, want exhausted/0", st.BurnTrajectory, st.DaysUntilBudgetExhausted)
 		}
 	})
+}
+
+// mkEvents builds n events for a project at a fixed timestamp, the first
+// `errors` of which are errors — good enough for burn rate tests, which
+// only care about counts within a window, not per-event spacing.
+func mkEvents(projectID string, ts time.Time, n, errors int) []models.Event {
+	events := make([]models.Event, n)
+	for i := range events {
+		events[i] = models.Event{
+			ProjectID: projectID, Timestamp: ts, LatencyMS: 50, StatusCode: 200,
+		}
+		if i < errors {
+			events[i].StatusCode = 500
+			events[i].Error = true
+		}
+	}
+	return events
+}
+
+func almostEqual(a, b, tol float64) bool {
+	return math.Abs(a-b) <= tol
+}
+
+// TestBurnRateRegression pins down the burn rate formula (error_rate /
+// allowed_error_rate) and IsBreaching so a future edit to the scaling
+// factor — like the one that was already fixed — gets caught immediately.
+func TestBurnRateRegression(t *testing.T) {
+	const burnTol = 0.01
+	const budgetTol = 0.1
+
+	type tc struct {
+		name          string
+		slo           models.SLO
+		seed          func(t *testing.T, s *storage.Store, now time.Time)
+		wantShort     float64
+		wantLong      float64
+		wantBreaching bool
+		wantBudgetPct float64
+	}
+
+	cases := []tc{
+		{
+			name: "zero traffic: no panic, burn rate zero",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 30},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				// nothing seeded
+			},
+			wantShort: 0, wantLong: 0, wantBreaching: false, wantBudgetPct: 100,
+		},
+		{
+			name: "perfect traffic: 0% errors, not breaching",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 14},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-30*time.Second), 500, 0)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertMetricsBatch([]models.Metric{{
+					ProjectID: "p", BucketStart: now.Add(-time.Hour), Resolution: "1h",
+					GoodEvents: 1000, TotalEvents: 1000,
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantShort: 0, wantLong: 0, wantBreaching: false, wantBudgetPct: 100,
+		},
+		{
+			// 0.5% errors on a 99.5% SLO: budget_frac = 0.5% too, so burn
+			// rate lands exactly on 1.0 — the boundary must not breach.
+			name: "exactly at SLO threshold: burn = 1.0, not breaching",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 7},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-30*time.Second), 200, 1)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertMetricsBatch([]models.Metric{{
+					ProjectID: "p", BucketStart: now.Add(-time.Hour), Resolution: "1h",
+					GoodEvents: 199, TotalEvents: 200,
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantShort: 1.0, wantLong: 1.0, wantBreaching: false, wantBudgetPct: 100,
+		},
+		{
+			// 1.2% errors against the same 1% budget_frac: burn rate must
+			// clear 1.0, not sit at it.
+			name: "just above threshold: burn > 1.0",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 99, LatencyThresholdMS: 1000, WindowDays: 90},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-30*time.Second), 1000, 12)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertMetricsBatch([]models.Metric{{
+					ProjectID: "p", BucketStart: now.Add(-time.Hour), Resolution: "1h",
+					GoodEvents: 990, TotalEvents: 1000,
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantShort: 1.2, wantLong: 1.2, wantBreaching: false, wantBudgetPct: 100,
+		},
+		{
+			// Short window (last 5m) is hot at 80% errors; the rest of the
+			// hour is clean enough to dilute the long-window rate back
+			// under its threshold. AND semantics must not fire.
+			name: "short window high, long window low: not breaching",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 95, LatencyThresholdMS: 1000, WindowDays: 60},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-time.Minute), 100, 80)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-10*time.Minute), 2000, 0)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			// short: 80/100 = 0.8 -> burn 16.0 (>14.4, breach)
+			// long: 80/2100 = 0.038095 -> burn 0.761905 (<1.0, no breach)
+			wantShort: 16.0, wantLong: 0.761905, wantBreaching: false, wantBudgetPct: 100,
+		},
+		{
+			// Both windows run hot at 80% errors: AND semantics must fire.
+			name: "both windows high: breaching",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 95, LatencyThresholdMS: 1000, WindowDays: 10},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-time.Minute), 100, 80)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-30*time.Minute), 100, 80)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			// short: 80/100 = 0.8 -> burn 16.0 (>14.4)
+			// long: 160/200 = 0.8 -> burn 16.0 (>1.0)
+			wantShort: 16.0, wantLong: 16.0, wantBreaching: true, wantBudgetPct: 100,
+		},
+		{
+			// 100% errors: burn rate must stay a large-but-finite number,
+			// never Inf/NaN, and budget must clamp at 0 remaining.
+			name: "budget fully exhausted: bounded, no overflow",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 45},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-30*time.Second), 100, 100)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertMetricsBatch([]models.Metric{{
+					ProjectID: "p", BucketStart: now.Add(-time.Hour), Resolution: "1h",
+					GoodEvents: 0, TotalEvents: 100,
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			// 1.0 error rate / 0.005 budget_frac = 200.0
+			wantShort: 200.0, wantLong: 200.0, wantBreaching: true, wantBudgetPct: 0,
+		},
+		{
+			// Only 3 raw events in the window — the formula must still
+			// divide cleanly rather than special-casing a minimum sample.
+			name: "partial window data: few events still compute correctly",
+			slo:  models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 21},
+			seed: func(t *testing.T, s *storage.Store, now time.Time) {
+				if err := s.InsertEventsBatch(mkEvents("p", now.Add(-30*time.Second), 3, 1)); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.InsertMetricsBatch([]models.Metric{{
+					ProjectID: "p", BucketStart: now.Add(-time.Hour), Resolution: "1h",
+					GoodEvents: 2, TotalEvents: 3,
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			// (1/3) / 0.005 = 66.6667
+			wantShort: 66.6667, wantLong: 66.6667, wantBreaching: true, wantBudgetPct: 67.0017,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, err := storage.Open(filepath.Join(t.TempDir(), "t.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+
+			now := time.Now().UTC()
+			c.seed(t, s, now)
+
+			st, err := Compute(s, c.slo, now.Add(time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if math.IsNaN(st.ShortBurnRate) || math.IsInf(st.ShortBurnRate, 0) {
+				t.Fatalf("ShortBurnRate not finite: %v", st.ShortBurnRate)
+			}
+			if math.IsNaN(st.LongBurnRate) || math.IsInf(st.LongBurnRate, 0) {
+				t.Fatalf("LongBurnRate not finite: %v", st.LongBurnRate)
+			}
+			if !almostEqual(st.ShortBurnRate, c.wantShort, burnTol) {
+				t.Errorf("ShortBurnRate = %v, want %v (±%v)", st.ShortBurnRate, c.wantShort, burnTol)
+			}
+			if !almostEqual(st.LongBurnRate, c.wantLong, burnTol) {
+				t.Errorf("LongBurnRate = %v, want %v (±%v)", st.LongBurnRate, c.wantLong, burnTol)
+			}
+			if st.IsBreaching != c.wantBreaching {
+				t.Errorf("IsBreaching = %v, want %v (short=%v long=%v)", st.IsBreaching, c.wantBreaching, st.ShortBurnRate, st.LongBurnRate)
+			}
+			if !almostEqual(st.BudgetRemainingPct, c.wantBudgetPct, budgetTol) {
+				t.Errorf("BudgetRemainingPct = %v, want %v (±%v)", st.BudgetRemainingPct, c.wantBudgetPct, budgetTol)
+			}
+		})
+	}
 }
