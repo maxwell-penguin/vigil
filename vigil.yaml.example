@@ -25,18 +25,12 @@ probes:
   - project_id: maxwell-portfolio
     url: https://maxwellpeng.com
     expected_status: 200
-  # Only resolves inside the docker-compose network — harmless probe
-  # failures if you run `go run ./cmd/server` outside Docker.
-  - project_id: demo-app
-    url: http://demo-app:9090/api/data
-    expected_status: 200
+  # demo-app removed: http://demo-app:9090/api/data only resolves inside
+  # the docker-compose network, so it just produces constant probe
+  # failures in standalone (non-Docker-Compose) deployments.
 
 slos:
   - project_id: example-site
-    target_pct: 99.5
-    latency_threshold_ms: 200
-    window_days: 30
-  - project_id: demo-app
     target_pct: 99.5
     latency_threshold_ms: 200
     window_days: 30
