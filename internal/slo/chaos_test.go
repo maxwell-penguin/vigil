@@ -158,3 +158,110 @@ func TestChaos_BothWindowsHaveData_ShortHealthyLongDegraded(t *testing.T) {
 		t.Fatalf("expected IsBreaching=false (short window has data and is healthy, AND semantics must hold), got true: %+v", st)
 	}
 }
+
+// TestChaos_ClockJumpBackwardExtendsCooldown targets checker.go's cooldown
+// check:
+//
+//	if ok && last.ResolvedAt.IsZero() && now.Sub(last.FiredAt) < AlertCooldown {
+//		continue // still within cooldown of an unresolved alert
+//	}
+//
+// now.Sub(last.FiredAt) is a signed duration. If `now` ever goes backward
+// relative to the last alert's FiredAt (NTP correction, container clock
+// reset, a monitoring backfill run with an old timestamp...), the
+// subtraction goes negative, and a negative duration is always <
+// AlertCooldown. The check can't distinguish "5 minutes into the cooldown"
+// from "10 hours before the alert even fired" - both suppress equally.
+func TestChaos_ClockJumpBackwardExtendsCooldown(t *testing.T) {
+	s := newFakeStore()
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	sloCfg := models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 30}
+
+	// Real, ongoing breach: both windows degraded (not the data-gap case),
+	// 50% errors against a 99.5% target -> burn 100 in both windows, well
+	// past both thresholds. This never changes for the rest of the test,
+	// so any suppression of subsequent alerts is purely a cooldown-logic
+	// artifact, not the breach clearing.
+	s.setWindowResult(LongWindow, 50, 100, nil)
+	s.setWindowResult(ShortWindow, 50, 100, nil)
+
+	checker := NewChecker(s, []models.SLO{sloCfg}, time.Minute, nil, nil)
+
+	// t0: first check, no prior alert -> should fire.
+	checker.checkAll(t0)
+	alerts, err := s.ListAlerts("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("after checkAll(t0=%v): %d alert(s)", t0, len(alerts))
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert after first check, got %d", len(alerts))
+	}
+	last, ok, err := s.LatestAlert("p")
+	if err != nil || !ok {
+		t.Fatalf("expected a latest alert after first check: ok=%v err=%v", ok, err)
+	}
+	if !last.FiredAt.Equal(t0) {
+		t.Fatalf("expected FiredAt=%v, got %v", t0, last.FiredAt)
+	}
+
+	// Clock jump backward: now = t0 - 10h, even though the breach never
+	// stopped. now.Sub(last.FiredAt) = -10h, which is < AlertCooldown (1h),
+	// so the existing check treats this exactly like "5 minutes into an
+	// active cooldown" and suppresses.
+	jumpBack := t0.Add(-10 * time.Hour)
+	checker.checkAll(jumpBack)
+	alerts, err = s.ListAlerts("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("after checkAll(t0-10h=%v): %d alert(s)", jumpBack, len(alerts))
+	if len(alerts) != 1 {
+		t.Fatalf("expected clock jump backward to suppress a new alert (still 1 total), got %d", len(alerts))
+	}
+
+	// Move forward from the skewed point. Both of these are still deep in
+	// negative Sub(last.FiredAt) territory (-9.5h, -8h59m), so both should
+	// still be suppressed under the existing logic.
+	followUps := []time.Time{
+		jumpBack.Add(30 * time.Minute), // t0 - 10h + 30m
+		jumpBack.Add(61 * time.Minute), // t0 - 10h + 61m
+	}
+	for _, tt := range followUps {
+		checker.checkAll(tt)
+		alerts, err = s.ListAlerts("p")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("after checkAll(%v) [%v relative to original FiredAt]: %d alert(s)",
+			tt, tt.Sub(t0), len(alerts))
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected still-suppressed after skewed follow-ups (still 1 total), got %d", len(alerts))
+	}
+
+	// Finally, move forward past where the real 1h cooldown from the
+	// ORIGINAL FiredAt (t0) would expire: t0 + AlertCooldown + 1 minute.
+	// This is over 10 hours after the skewed follow-up checks above.
+	recoveryPoint := t0.Add(AlertCooldown + time.Minute)
+	checker.checkAll(recoveryPoint)
+	alerts, err = s.ListAlerts("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("after checkAll(t0+cooldown+1m=%v): %d alert(s)", recoveryPoint, len(alerts))
+
+	// What this means in plain terms: the intended cooldown is 1 hour. The
+	// backward jump used here was 10 hours. Because now.Sub(last.FiredAt)
+	// went negative, every check between the jump and the point where wall
+	// clock time caught back up to t0+1h stayed suppressed - a real-world
+	// suppression window of roughly 10h (the jump) + 1h (the intended
+	// cooldown) = ~11 hours, not the 1 hour AlertCooldown promises, even
+	// though the breach was continuous and severe the entire time. A
+	// second alert only fires once `now` naturally reaches t0+1h+1m again,
+	// which is exactly the recovery point checked here.
+	if len(alerts) != 2 {
+		t.Fatalf("expected a second alert once now caught back up to FiredAt+AlertCooldown, got %d alert(s)", len(alerts))
+	}
+}
