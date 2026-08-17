@@ -59,7 +59,17 @@ func (c *Checker) checkAll(now time.Time) {
 			log.Printf("slo %s: latest alert: %v", s.ProjectID, err)
 			continue
 		}
-		if ok && last.ResolvedAt.IsZero() && now.Sub(last.FiredAt) < AlertCooldown {
+		// now.Before(last.FiredAt) means the clock moved backward since the
+		// last alert (NTP correction, container clock reset, a backfill run
+		// with an old timestamp...). In that case now.Sub(last.FiredAt) is
+		// negative and would always satisfy "< AlertCooldown", silently
+		// extending suppression by however large the backward jump was. For
+		// a paging system, failing toward an extra alert during a clock
+		// anomaly is the safer failure mode than failing toward silence
+		// during what might be a real, ongoing outage - so a backward jump
+		// is never treated as "still in cooldown".
+		inCooldown := ok && last.ResolvedAt.IsZero() && !now.Before(last.FiredAt) && now.Sub(last.FiredAt) < AlertCooldown
+		if inCooldown {
 			continue // still within cooldown of an unresolved alert
 		}
 

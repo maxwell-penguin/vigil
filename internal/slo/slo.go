@@ -83,11 +83,11 @@ func Compute(s Store, slo models.SLO, now time.Time) (Status, error) {
 
 	// Burn windows both hit raw_events: the 1h window is always inside the raw
 	// retention window (Downsample only rolls rows older than 24h).
-	shortRate, err := errorRate(s, slo, now.Add(-ShortWindow), now)
+	shortRate, shortHasData, err := errorRate(s, slo, now.Add(-ShortWindow), now)
 	if err != nil {
 		return Status{}, err
 	}
-	longRate, err := errorRate(s, slo, now.Add(-LongWindow), now)
+	longRate, _, err := errorRate(s, slo, now.Add(-LongWindow), now)
 	if err != nil {
 		return Status{}, err
 	}
@@ -125,6 +125,17 @@ func Compute(s Store, slo models.SLO, now time.Time) (Status, error) {
 		}
 	}
 
+	// Short window with no data at all (a monitoring gap, not genuinely
+	// clean traffic) can't tell "healthy" from "unmeasured" — requiring it
+	// to clear ShortBurnThreshold would let a gap silently mask a real,
+	// ongoing breach the long window is clearly showing. So the short-window
+	// requirement only applies when the short window actually has data;
+	// otherwise IsBreaching falls back to the long window alone.
+	isBreaching := longBurn > LongBurnThreshold
+	if shortHasData {
+		isBreaching = isBreaching && shortBurn > ShortBurnThreshold
+	}
+
 	return Status{
 		ProjectID:                slo.ProjectID,
 		SLOPct:                   sloPct,
@@ -132,20 +143,23 @@ func Compute(s Store, slo models.SLO, now time.Time) (Status, error) {
 		BudgetRemainingPct:       budgetRemaining,
 		ShortBurnRate:            shortBurn,
 		LongBurnRate:             longBurn,
-		IsBreaching:              shortBurn > ShortBurnThreshold && longBurn > LongBurnThreshold,
+		IsBreaching:              isBreaching,
 		DaysUntilBudgetExhausted: daysUntilExhausted,
 		BurnTrajectory:           trajectory,
 	}, nil
 }
 
-// errorRate returns a fraction in [0,1].
-func errorRate(s Store, slo models.SLO, from, to time.Time) (float64, error) {
+// errorRate returns the error fraction in [0,1] for the window, and whether
+// the window had any events at all. total==0 (a data gap) is not the same
+// as a genuinely 0% error rate — callers that need to tell them apart use
+// hasData rather than treating rate==0 as "no errors".
+func errorRate(s Store, slo models.SLO, from, to time.Time) (rate float64, hasData bool, err error) {
 	good, total, err := s.CountRawInWindow(slo.ProjectID, from, to, slo.LatencyThresholdMS)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if total == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
-	return float64(total-good) / float64(total), nil
+	return float64(total-good) / float64(total), true, nil
 }
