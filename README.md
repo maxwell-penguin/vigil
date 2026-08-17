@@ -49,6 +49,7 @@ Drop a live status badge in your own README:
 - [Deployment](#deployment)
 - [Security](#security)
 - [Backpressure and Load Shedding](#backpressure-and-load-shedding)
+- [Chaos Testing the Alerting Engine](#chaos-testing-the-alerting-engine)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
@@ -233,6 +234,72 @@ limiter, since 100 events/second per project is a low ceiling. To actually
 stress the shared write queue, run multiple `loadgen` processes at once
 against different `-project` values. Each one stays under its own
 per-project limit, and the combined load lands on the queue.
+
+## Chaos Testing the Alerting Engine
+
+Chaos testing here does not mean taking down real infrastructure. It means
+feeding the SLO engine (`internal/slo`) broken and weird inputs through a
+fake in-memory store and checking whether alerting still does the right
+thing. A gap in recent data, or a clock that jumps backward, are normal in
+production but rarely show up in a happy-path test.
+
+Two chaos tests found real bugs. Both are fixed now.
+
+### Bug 1: a data gap could hide a real breach
+
+Vigil checks two windows before alerting: the last 5 minutes and the last
+hour. Both have to clear their burn-rate threshold before an alert fires.
+That's intentional, it stops a single noisy blip from paging anyone.
+
+The bug: if the 5-minute window had zero events at all, say from an
+ingestion hiccup, the error rate for that window came back as 0, the exact
+same value a genuinely healthy window would produce. The engine couldn't
+tell "no data" apart from "no errors". So if the short window went quiet
+while the long window showed a severe, ongoing breach (50% errors against a
+99.5% target), the missing short-window data silently kept `IsBreaching`
+false.
+
+The fix: the error rate calculation now also reports whether a window had
+any events at all. When the short window is empty, its threshold
+requirement is skipped and alerting falls back to the long window alone.
+When the short window has real data, the original two-window check is
+unchanged.
+
+### Bug 2: a backward clock jump could suppress alerts for hours
+
+Alerts have a 1-hour cooldown so a breach doesn't repage every check cycle.
+The cooldown check compared `now` to the last alert's fired time and assumed
+`now` only ever moves forward.
+
+The bug: if the clock ever went backward, an NTP correction or a VM
+pause/resume for example, that comparison went negative, and a negative
+number always looks like "still within the cooldown". In testing, a
+10-hour backward jump during a continuous, severe breach suppressed
+re-alerting for roughly 11 real-world hours instead of the intended 1.
+
+The fix: cooldown now only applies when `now` is not before the last
+alert's fired time. A clock anomaly fails toward sending an extra alert
+instead of staying silent, which is the safer direction for a paging
+system. One known tradeoff: because the latest alert is picked by fired
+time, not insertion order, a sustained backward-clock period can produce
+more than one extra alert instead of exactly one. Noisy, but never silent,
+and the test confirms it.
+
+### Tests
+
+Both bugs are pinned down by their own chaos tests, plus two tests
+confirming the fixes didn't break normal behavior:
+
+- `TestChaos_DataGapMasksRealBreach`
+- `TestChaos_BothWindowsHaveData_ShortHealthyLongDegraded`
+- `TestChaos_ClockJumpBackwardExtendsCooldown`
+- `TestChaos_ForwardCooldownUnaffected`
+
+Run them with:
+
+```sh
+go test ./internal/slo/... -run TestChaos -v
+```
 
 ## Project Structure
 
