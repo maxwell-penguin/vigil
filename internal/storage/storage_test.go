@@ -2,11 +2,13 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"vigil/internal/models"
+	"vigil/internal/selfmetrics"
 )
 
 // ponytail: one self-check for the non-trivial path (downsample).
@@ -106,5 +108,39 @@ func TestStartWriterFlushesOnTimer(t *testing.T) {
 			t.Fatalf("events not flushed within deadline, got %d rows", count)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// ponytail: one self-check for the backpressure path — with no StartWriter
+// draining the queue, filling it to exactly eventQueueSize must still
+// succeed (nil errors all the way), and the very next InsertEvent must
+// report models.ErrQueueFull instead of silently dropping the event.
+func TestInsertEventReturnsErrQueueFullWhenFull(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	baseDropped := selfmetrics.IngestEventsDropped.Load()
+
+	now := time.Now().UTC()
+	for i := 0; i < eventQueueSize; i++ {
+		if err := s.InsertEvent(models.Event{
+			ProjectID: "p", Timestamp: now, LatencyMS: 50, StatusCode: 200, Error: false,
+		}); err != nil {
+			t.Fatalf("insert %d: want nil filling the queue, got %v", i, err)
+		}
+	}
+
+	err = s.InsertEvent(models.Event{
+		ProjectID: "p", Timestamp: now, LatencyMS: 50, StatusCode: 200, Error: false,
+	})
+	if !errors.Is(err, models.ErrQueueFull) {
+		t.Fatalf("insert past capacity: err = %v, want models.ErrQueueFull", err)
+	}
+
+	if got := selfmetrics.IngestEventsDropped.Load() - baseDropped; got != 1 {
+		t.Fatalf("IngestEventsDropped increased by %d, want 1", got)
 	}
 }

@@ -48,6 +48,7 @@ Drop a live status badge in your own README:
 - [Status Pages](#status-pages)
 - [Deployment](#deployment)
 - [Security](#security)
+- [Backpressure and Load Shedding](#backpressure-and-load-shedding)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
@@ -168,6 +169,70 @@ Generate a strong key with: `openssl rand -hex 32`
 Rate limiting: `/ingest` is rate-limited to 100 events/second per project
 (burst of 500) to prevent accidental SDK misconfiguration from overwhelming
 the database.
+
+## Backpressure and Load Shedding
+
+Vigil is built to survive being overwhelmed, not just to work when things are
+calm. There are two layers of protection on the write path.
+
+First, the per-project rate limiter catches most abuse before it becomes a
+problem. Each project is capped at 100 events/second with a burst of 500. A
+single misbehaving SDK or a bad deploy loop gets rejected with 429s
+immediately, before it touches the database.
+
+Second, anything that gets through in aggregate hits a bounded internal write
+queue. Many different projects can each stay under their own rate limit and
+still add up to more than the queue can handle. When that queue fills up,
+Vigil sheds load on purpose instead of crashing or silently dropping data. It
+returns 503 with `Retry-After` when the queue is completely full, or a 200
+with an honest `dropped` count in the response body when only part of a
+batch got dropped. Either way, the caller knows exactly what happened.
+
+### Load test results
+
+Setup: local server, 10 concurrent `loadgen` processes, 50 workers each (500
+total concurrent workers), spread across 10 different project_ids, sustained
+for 10 seconds, all hitting POST /ingest.
+
+| Metric | Value |
+|---|---|
+| Total requests sent | 562,545 |
+| 429 (per-project rate limit) | 547,529 |
+| 202 (fully accepted) | 12,800 |
+| 200 (partially accepted, some dropped) | 874 |
+| 503 (write queue fully overloaded) | 1,342 |
+| Events accepted | 134,353 |
+| Events dropped (queue full) | 15,807 |
+| Client latency p50 | 2.8ms to 7.3ms |
+| Client latency p95 | 24ms to 33ms |
+| Client latency p99 | 54ms to 63ms |
+
+The server stayed up the whole test. Zero crashes, zero unhandled errors.
+
+Most of the traffic, 547,529 of 562,545 requests, never got past the rate
+limiter, which is exactly what it's for. The write queue only had to absorb
+what got through, and it shed about 10% of that (15,807 dropped out of
+150,160 accepted plus dropped) instead of falling over.
+
+One honest note on methodology: the before and after queue depth snapshots
+mostly read 0. The write queue flushes every 500ms, faster than a single
+snapshot can catch it mid-burst. The dropped counter is the reliable signal
+here, not the depth snapshot. If you check this yourself, watch
+`vigil_internal_ingest_dropped_total`, not queue depth.
+
+### Reproducing it
+
+Run the load generator:
+
+```sh
+go run ./tools/loadgen -url http://localhost:8080 -project loadtest -workers 50 -duration 10s -batch-size 10
+```
+
+A single process against one project_id will mostly just hit the rate
+limiter, since 100 events/second per project is a low ceiling. To actually
+stress the shared write queue, run multiple `loadgen` processes at once
+against different `-project` values. Each one stays under its own
+per-project limit, and the combined load lands on the queue.
 
 ## Project Structure
 
