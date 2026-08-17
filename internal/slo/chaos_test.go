@@ -120,18 +120,41 @@ func TestChaos_DataGapMasksRealBreach(t *testing.T) {
 	}
 	t.Logf("computed status: %+v", st)
 
-	// errorRate() treats total==0 as "rate 0", the same value it would
-	// return for a genuinely perfect window - it can't tell "no data" apart
-	// from "no errors". IsBreaching requires BOTH short and long burn to
-	// clear their thresholds (AND semantics, slo.go's Compute). So if
-	// IsBreaching comes back false here, it means a data gap confined to
-	// the short window is enough to fully mask a real, ongoing breach that
-	// the long window is clearly showing - anyone paging off IsBreaching
-	// alone would see a healthy status while 50% of requests are failing.
-	// That's true regardless of whether this specific assertion is
-	// "correct" or "wrong": either the AND semantics need a data-gap
-	// carve-out, or on-call needs a separate "stale short window" signal.
+	// errorRate() now reports hasData alongside the rate, so Compute can
+	// tell "no events in the short window" apart from "events, zero
+	// errors". When the short window has no data, the short-window
+	// threshold is skipped entirely and IsBreaching falls back to the long
+	// window alone. Here the long window is clearly critical (50% errors
+	// against a 99.5% target), so a data gap in the short window must not
+	// hide that from anyone paging off IsBreaching.
+	if !st.IsBreaching {
+		t.Fatalf("expected IsBreaching=true (long-window breach must not be masked by a short-window data gap), got false: %+v", st)
+	}
+}
+
+// TestChaos_BothWindowsHaveData_ShortHealthyLongDegraded confirms the
+// data-gap fallback didn't loosen the normal two-window AND behavior: when
+// the short window has real data and it's healthy, a degraded long window
+// alone must still not breach.
+func TestChaos_BothWindowsHaveData_ShortHealthyLongDegraded(t *testing.T) {
+	s := newFakeStore()
+	now := time.Now().UTC()
+
+	sloCfg := models.SLO{ProjectID: "p", TargetPct: 99.5, LatencyThresholdMS: 1000, WindowDays: 30}
+
+	// Long window: 50 good / 100 total -> 50% error rate, well past a
+	// critical burn rate on its own.
+	s.setWindowResult(LongWindow, 50, 100, nil)
+	// Short window: real data, healthy -> 0% error rate.
+	s.setWindowResult(ShortWindow, 100, 100, nil)
+
+	st, err := Compute(s, sloCfg, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("computed status: %+v", st)
+
 	if st.IsBreaching {
-		t.Fatalf("expected IsBreaching=false (short-window data gap masks the long-window breach), got true: %+v", st)
+		t.Fatalf("expected IsBreaching=false (short window has data and is healthy, AND semantics must hold), got true: %+v", st)
 	}
 }
