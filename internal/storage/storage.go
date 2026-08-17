@@ -61,13 +61,15 @@ func (s *Store) Close() error { return s.db.Close() }
 // InsertEvent enqueues a single event for the writer goroutine started by
 // StartWriter to batch and flush. It never blocks: if the queue is full
 // (StartWriter isn't running, or the DB can't keep up), the event is
-// dropped and logged rather than stalling the caller's request.
+// dropped and logged rather than stalling the caller's request, and
+// models.ErrQueueFull is returned so the caller knows the event didn't land.
 func (s *Store) InsertEvent(e models.Event) error {
 	select {
 	case s.eventQueue <- []models.Event{e}:
 	default:
 		selfmetrics.IngestEventsDropped.Add(1)
 		log.Printf("event queue full: dropping event for project %s", e.ProjectID)
+		return models.ErrQueueFull
 	}
 	return nil
 }
