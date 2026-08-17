@@ -31,7 +31,7 @@ export default function LatencyChart({ metrics }) {
   const last = data.length ? data[data.length - 1] : null;
 
   return (
-    <div className="card p-5">
+    <div id="latency" className="card scroll-mt-20 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm font-medium text-ink">Latency distribution</div>
         <div className="flex items-center gap-0.5 rounded-md bg-subtle p-0.5">

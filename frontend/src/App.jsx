@@ -12,18 +12,11 @@ const DEFAULT_PROJECT = import.meta.env.VITE_PROJECT_ID || "example-site";
 
 export default function App() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT);
-  const [view, setView] = useState("Overview");
   const { slo, incidents, metrics, error, loading } = useDashboardData(projectId);
 
   return (
     <div className="flex min-h-screen bg-white text-ink">
-      <Sidebar
-        projectId={projectId}
-        onProjectChange={setProjectId}
-        slo={slo}
-        view={view}
-        onViewChange={setView}
-      />
+      <Sidebar projectId={projectId} onProjectChange={setProjectId} slo={slo} />
 
       <div className="min-w-0 flex-1">
         <TopBar projectId={projectId} />

@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 
-const VIEWS = ["Overview", "Latency", "Incidents", "SLO Config"];
+// SLO Config has no dedicated page yet — points at the badge section, which
+// is the closest thing to SLO config the dashboard currently shows.
+const VIEWS = [
+  { label: "Overview", id: "overview" },
+  { label: "Latency", id: "latency" },
+  { label: "Incidents", id: "incidents" },
+  { label: "SLO Config", id: "badge" },
+];
 
 function SectionLabel({ children }) {
   return (
@@ -10,12 +17,47 @@ function SectionLabel({ children }) {
   );
 }
 
-export default function Sidebar({ projectId, onProjectChange, slo, view, onViewChange }) {
+export default function Sidebar({ projectId, onProjectChange, slo }) {
   // No SLO loaded yet reads as neutral rather than falsely healthy.
   const dotColor = !slo ? "bg-ink-muted" : slo.is_breaching ? "bg-danger" : "bg-ok";
 
   const [inputValue, setInputValue] = useState(projectId);
   useEffect(() => setInputValue(projectId), [projectId]);
+
+  const [activeId, setActiveId] = useState(VIEWS[0].id);
+
+  // The tracked sections only mount once dashboard data has loaded, so this
+  // re-runs (and finds the real elements) the moment that flips to true;
+  // `slo` itself is a new object on every 30s poll, which would otherwise
+  // tear down and recreate the observer on every refresh.
+  const hasContent = Boolean(slo);
+
+  useEffect(() => {
+    const sections = VIEWS.map((v) => document.getElementById(v.id)).filter(Boolean);
+    if (sections.length === 0) return;
+
+    const ratios = new Map(sections.map((el) => [el.id, 0]));
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => ratios.set(entry.target.id, entry.intersectionRatio));
+
+        let bestId = null;
+        let bestRatio = 0;
+        ratios.forEach((ratio, id) => {
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestId = id;
+          }
+        });
+        if (bestId) setActiveId(bestId);
+      },
+      { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] }
+    );
+
+    sections.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [hasContent]);
 
   return (
     <aside className="sticky top-0 h-screen w-60 shrink-0 overflow-y-auto border-r border-line bg-[#fafafa] px-4 py-5">
@@ -46,12 +88,14 @@ export default function Sidebar({ projectId, onProjectChange, slo, view, onViewC
 
       <SectionLabel>Views</SectionLabel>
       <nav className="space-y-0.5">
-        {VIEWS.map((v) => {
-          const active = v === view;
+        {VIEWS.map(({ label, id }) => {
+          const active = id === activeId;
           return (
             <button
-              key={v}
-              onClick={() => onViewChange(v)}
+              key={id}
+              onClick={() =>
+                document.getElementById(id)?.scrollIntoView({ behavior: "smooth" })
+              }
               className={
                 "flex w-full items-center rounded-md border-l-2 px-2 py-1.5 text-left text-sm transition-colors " +
                 (active
@@ -59,7 +103,7 @@ export default function Sidebar({ projectId, onProjectChange, slo, view, onViewC
                   : "border-transparent text-ink-secondary hover:bg-line/50 hover:text-ink")
               }
             >
-              {v}
+              {label}
             </button>
           );
         })}

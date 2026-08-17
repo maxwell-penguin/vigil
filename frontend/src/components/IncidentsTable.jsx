@@ -65,7 +65,7 @@ export default function IncidentsTable({ incidents }) {
   }
 
   return (
-    <div className="card p-5">
+    <div id="incidents" className="card scroll-mt-20 p-5">
       <div className="text-sm font-medium text-ink">Incident history</div>
 
       {incidents.length === 0 ? (
