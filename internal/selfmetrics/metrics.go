@@ -12,4 +12,7 @@ var (
 	WebhookFailures      atomic.Int64 // webhook delivery failures
 	GitHubIssueFailures  atomic.Int64 // github issue creation failures
 	SLOChecksRun         atomic.Int64 // total SLO check cycles completed
+
+	RateLimiterTrackedProjects atomic.Int64 // current number of tracked per-project rate limiters
+	RateLimiterEvictions       atomic.Int64 // total rate limiters evicted (LRU cap reached)
 )

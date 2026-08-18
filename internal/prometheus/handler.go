@@ -117,6 +117,14 @@ func SelfHandler() http.HandlerFunc {
 
 		fmt.Fprintf(w, "# HELP vigil_internal_slo_checks_total Total SLO check cycles completed\n")
 		fmt.Fprintf(w, "# TYPE vigil_internal_slo_checks_total counter\n")
-		fmt.Fprintf(w, "vigil_internal_slo_checks_total %d\n", selfmetrics.SLOChecksRun.Load())
+		fmt.Fprintf(w, "vigil_internal_slo_checks_total %d\n\n", selfmetrics.SLOChecksRun.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_ratelimit_tracked_projects Current number of tracked per-project rate limiters\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_ratelimit_tracked_projects gauge\n")
+		fmt.Fprintf(w, "vigil_internal_ratelimit_tracked_projects %d\n\n", selfmetrics.RateLimiterTrackedProjects.Load())
+
+		fmt.Fprintf(w, "# HELP vigil_internal_ratelimit_evictions_total Total rate limiters evicted (LRU cap reached)\n")
+		fmt.Fprintf(w, "# TYPE vigil_internal_ratelimit_evictions_total counter\n")
+		fmt.Fprintf(w, "vigil_internal_ratelimit_evictions_total %d\n", selfmetrics.RateLimiterEvictions.Load())
 	}
 }
