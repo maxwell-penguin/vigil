@@ -1,12 +1,14 @@
 <div align="center">
 
+<p align="center">
+  <img src=".github/assets/vigil-logo.png" alt="Vigil" width="420">
+</p>
+
 ![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go)
 [![CI](https://github.com/maxwell-penguin/vigil/actions/workflows/test.yml/badge.svg)](https://github.com/maxwell-penguin/vigil/actions/workflows/test.yml)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)
 ![Fly.io](https://img.shields.io/badge/deployed-fly.io-purple)
-
-# Vigil
 
 *SRE reliability toolkit for open source maintainers*
 
