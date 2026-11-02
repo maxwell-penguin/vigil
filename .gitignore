@@ -3,3 +3,5 @@ vigil.db
 vigil.db-shm
 vigil.db-wal
 /vigil
+.DS_Store
+**/.DS_Store
